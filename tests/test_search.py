@@ -8,7 +8,7 @@ import pytest
 
 from polylens_bilibili.api import _search as search_mod
 from polylens_bilibili.api._signing import NavInfo
-from polylens_bilibili.errors import PolylensError, RateLimitedError
+from polylens_bilibili.errors import BilibiliError, RateLimitedError
 from polylens_bilibili.models import Page, SearchItem
 
 # ── 标题清洗 / 字段映射 ─────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ def test_echoed_page_size_mismatch_fails_loudly(monkeypatch: pytest.MonkeyPatch)
     结果是静默截断或重复，且没有任何信号能让调用方察觉。
     """
     client = _stub(monkeypatch, [_raw(i) for i in range(20)], pagesize=20)
-    with pytest.raises(PolylensError, match="每页条数"):
+    with pytest.raises(BilibiliError, match="每页条数"):
         _fetch(client, count=50)
 
 
@@ -162,7 +162,7 @@ def test_echoed_page_size_matching_passes(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_empty_query_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _stub(monkeypatch, [])
-    with pytest.raises(PolylensError, match="关键词"):
+    with pytest.raises(BilibiliError, match="关键词"):
         search_mod.fetch_search(client, "   ", count=10)
     assert client.calls == []  # 不发请求
 
@@ -182,7 +182,7 @@ def test_negative_cursor_normalized_to_start(monkeypatch: pytest.MonkeyPatch) ->
 def test_unparsable_cursor_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """游标由本能力发出，解析不了说明调用方自造了。"""
     client = _stub(monkeypatch, [_raw(1)])
-    with pytest.raises(PolylensError, match="游标"):
+    with pytest.raises(BilibiliError, match="游标"):
         _fetch(client, count=10, cursor="not-a-number")
 
 
@@ -227,7 +227,7 @@ def test_non_list_result_fails_loudly(monkeypatch: pytest.MonkeyPatch, shape: An
     falsy 的那几个（""、{}、0、False）同样要拦：判定若排在兜空值之后，它们会被
     悄悄改写成 []，当成"没有结果"放行。只有 result 整个缺席才是真的没有结果。
     """
-    with pytest.raises(PolylensError, match="result"):
+    with pytest.raises(BilibiliError, match="result"):
         _fetch(_stub(monkeypatch, shape), count=10)
 
 

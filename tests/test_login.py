@@ -8,7 +8,7 @@ from unittest.mock import patch
 from polylens_bilibili.api._http import HttpClient
 from polylens_bilibili.api._login import check_qr_login, start_qr_login
 from polylens_bilibili.credentials import delete_cookie, load_cookie, save_cookie
-from polylens_bilibili.models import LoginStatus
+from polylens_bilibili.models import QrStatus
 
 # ── 凭据读写 ────────────────────────────────────────────────────────────────
 
@@ -71,21 +71,21 @@ def _poll(client: HttpClient, sub_code: int, set_cookies: list[str] | None = Non
 
 def test_check_qr_login_waiting() -> None:
     result = _poll(_client(), 86101)
-    assert result.status is LoginStatus.WAITING
+    assert result.status is QrStatus.WAITING
     assert result.cookie == ""
 
 
 def test_check_qr_login_scanned() -> None:
-    assert _poll(_client(), 86090).status is LoginStatus.SCANNED
+    assert _poll(_client(), 86090).status is QrStatus.SCANNED
 
 
 def test_check_qr_login_expired() -> None:
-    assert _poll(_client(), 86038).status is LoginStatus.EXPIRED
+    assert _poll(_client(), 86038).status is QrStatus.EXPIRED
 
 
 def test_check_qr_login_unknown_code_treated_as_expired() -> None:
     """未知状态码当作过期：让模型重新发码，是安全的降级。"""
-    assert _poll(_client(), 99999).status is LoginStatus.EXPIRED
+    assert _poll(_client(), 99999).status is QrStatus.EXPIRED
 
 
 def test_check_qr_login_success_extracts_cookies() -> None:
@@ -98,7 +98,7 @@ def test_check_qr_login_success_extracts_cookies() -> None:
             "DedeUserID=123; Domain=.bilibili.com; Path=/",
         ],
     )
-    assert result.status is LoginStatus.SUCCESS
+    assert result.status is QrStatus.SUCCESS
     assert "SESSDATA=abc" in result.cookie
     assert "bili_jct=xyz" in result.cookie
     assert "DedeUserID=123" in result.cookie

@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import json
 
-from ..models import LoginCheckResult, LoginStatus, QrLoginSession
+from ..models import LoginCheckResult, QrLoginSession, QrStatus
 from ._constants import ENDPOINTS, PASSPORT_BASE
 from ._http import HttpClient
 
-_CODE_TO_STATUS: dict[int, LoginStatus] = {
-    86101: LoginStatus.WAITING,
-    86090: LoginStatus.SCANNED,
-    86038: LoginStatus.EXPIRED,
+_CODE_TO_STATUS: dict[int, QrStatus] = {
+    86101: QrStatus.WAITING,
+    86090: QrStatus.SCANNED,
+    86038: QrStatus.EXPIRED,
 }
 
 
@@ -38,6 +38,6 @@ def check_qr_login(client: HttpClient, key: str) -> LoginCheckResult:
     if sub_code == 0:
         parts = [sc.split(";")[0].strip() for sc in set_cookie_headers]
         cookie = "; ".join(p for p in parts if p)
-        return LoginCheckResult(status=LoginStatus.SUCCESS, cookie=cookie)
+        return LoginCheckResult(status=QrStatus.SUCCESS, cookie=cookie)
 
-    return LoginCheckResult(status=_CODE_TO_STATUS.get(sub_code, LoginStatus.EXPIRED))
+    return LoginCheckResult(status=_CODE_TO_STATUS.get(sub_code, QrStatus.EXPIRED))

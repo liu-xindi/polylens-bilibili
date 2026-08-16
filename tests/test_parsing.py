@@ -11,9 +11,9 @@ from polylens_bilibili.api._comments import _normalize_reply
 from polylens_bilibili.api._danmaku import parse_danmaku_xml, top_by_heat
 from polylens_bilibili.api._frame import _pick_stream
 from polylens_bilibili.api._subtitles import _normalize_url
-from polylens_bilibili.api._video import build_content_info, cid_for_page, clip_duration
-from polylens_bilibili.errors import PolylensError
-from polylens_bilibili.models import BulletComment
+from polylens_bilibili.api._video import build_video_info, cid_for_page, clip_duration
+from polylens_bilibili.errors import BilibiliError
+from polylens_bilibili.models import Danmaku
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def _pin_timezone():
     time.tzset()
 
 
-# ── build_content_info ──────────────────────────────────────────────────────
+# ── build_video_info ──────────────────────────────────────────────────────
 
 
 def _view(**kw):
@@ -43,9 +43,9 @@ def _view(**kw):
     return base
 
 
-def test_build_content_info_basic_fields():
+def test_build_video_info_basic_fields():
     view = _view(stat={"view": 1000, "like": 50, "danmaku": 10, "reply": 7, "coin": 20})
-    info, aid, cid = build_content_info(view)
+    info, aid, cid = build_video_info(view)
     assert info.title == "test title"
     assert info.author == "up主"
     assert info.id == "BV1xx"
@@ -59,60 +59,60 @@ def test_build_content_info_basic_fields():
     assert info.published_at == "2023-11-15 06:13"  # 本机时区可读时间
 
 
-def test_build_content_info_absent_stats_are_none():
+def test_build_video_info_absent_stats_are_none():
     """平台没给的统计项为 None；给了 0 则保留 0。"""
-    info, _, _ = build_content_info(_view(stat={"view": 0}))
+    info, _, _ = build_video_info(_view(stat={"view": 0}))
     assert info.view_count == 0
     assert info.like_count is None
     assert info.coin_count is None
 
 
-def test_build_content_info_desc_v2_preferred_over_desc():
-    info, _, _ = build_content_info(_view(desc_v2=[{"raw_text": "v2 text"}], desc="old text"))
+def test_build_video_info_desc_v2_preferred_over_desc():
+    info, _, _ = build_video_info(_view(desc_v2=[{"raw_text": "v2 text"}], desc="old text"))
     assert info.summary == "v2 text"
 
 
-def test_build_content_info_desc_fallback_when_no_desc_v2():
-    info, _, _ = build_content_info(_view(desc="fallback desc"))
+def test_build_video_info_desc_fallback_when_no_desc_v2():
+    info, _, _ = build_video_info(_view(desc="fallback desc"))
     assert info.summary == "fallback desc"
 
 
-def test_build_content_info_empty_desc_gives_none():
-    info, _, _ = build_content_info(_view(desc=""))
+def test_build_video_info_empty_desc_gives_none():
+    info, _, _ = build_video_info(_view(desc=""))
     assert info.summary is None
 
 
-def test_build_content_info_cid_from_pages_when_missing():
+def test_build_video_info_cid_from_pages_when_missing():
     view = _view()
     del view["cid"]
     view["pages"] = [{"cid": 300}, {"cid": 301}]
-    _, _, cid = build_content_info(view)
+    _, _, cid = build_video_info(view)
     assert cid == 300
 
 
-def test_build_content_info_raises_when_no_cid():
+def test_build_video_info_raises_when_no_cid():
     view = _view()
     del view["cid"]
-    with pytest.raises(PolylensError):
-        build_content_info(view)
+    with pytest.raises(BilibiliError):
+        build_video_info(view)
 
 
-def test_build_content_info_url_shape():
-    info, _, _ = build_content_info(_view(bvid="BV1abc"))
+def test_build_video_info_url_shape():
+    info, _, _ = build_video_info(_view(bvid="BV1abc"))
     assert info.url == "https://www.bilibili.com/video/BV1abc/"
 
 
-def test_build_content_info_category_and_duration():
-    info, _, _ = build_content_info(_view(duration=120, videos=3, tid=17, tname="游戏"))
+def test_build_video_info_category_and_duration():
+    info, _, _ = build_video_info(_view(duration=120, videos=3, tid=17, tname="游戏"))
     assert info.duration_sec == 120
     assert info.part_count == 3
     assert info.category_id == 17
     assert info.category_name == "游戏"
 
 
-def test_build_content_info_single_part_has_no_part_fields():
+def test_build_video_info_single_part_has_no_part_fields():
     """单段视频不给分段菜单字段。"""
-    info, _, _ = build_content_info(_view())
+    info, _, _ = build_video_info(_view())
     assert info.current_page is None
     assert info.current_part is None
     assert info.parts is None
@@ -143,7 +143,7 @@ def test_cid_for_page_picks_selected_part():
 
 def test_cid_for_page_out_of_range_raises():
     """多段视频要的那段不存在时报错，不静默给第 1 段。"""
-    with pytest.raises(PolylensError):
+    with pytest.raises(BilibiliError):
         cid_for_page(_multi_view(), 99)
 
 
@@ -153,8 +153,8 @@ def test_cid_for_page_single_part_ignores_page():
     assert cid_for_page(_view(), 99) == 200
 
 
-def test_build_content_info_multi_part_selects_cid_and_exposes_parts():
-    info, _aid, cid = build_content_info(_multi_view(), page=2)
+def test_build_video_info_multi_part_selects_cid_and_exposes_parts():
+    info, _aid, cid = build_video_info(_multi_view(), page=2)
     assert cid == 201  # 用第 2 段的 cid（内部返回值，供后续能力）
     assert info.current_page == 2
     assert info.current_part == "正片"
@@ -163,8 +163,8 @@ def test_build_content_info_multi_part_selects_cid_and_exposes_parts():
     assert [p["part"] for p in info.parts or []] == ["片头", "正片", "片尾"]
 
 
-def test_build_content_info_multi_part_default_page_one():
-    info, _aid, cid = build_content_info(_multi_view())
+def test_build_video_info_multi_part_default_page_one():
+    info, _aid, cid = build_video_info(_multi_view())
     assert cid == 200
     assert info.current_page == 1
 
@@ -264,8 +264,8 @@ def test_parse_danmaku_empty_xml():
 # ── top_by_heat ─────────────────────────────────────────────────────────────
 
 
-def _bullet(ts: float, heat: int) -> BulletComment:
-    return BulletComment(content=f"t{ts}", timestamp=ts, heat=heat)
+def _bullet(ts: float, heat: int) -> Danmaku:
+    return Danmaku(content=f"t{ts}", timestamp=ts, heat=heat)
 
 
 def test_top_by_heat_picks_hottest_then_time_order():

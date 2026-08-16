@@ -16,7 +16,7 @@ from socketserver import ThreadingMixIn
 from typing import Any
 from urllib.request import Request
 
-from ..errors import AuthRequiredError, PolylensError
+from ..errors import AuthRequiredError, BilibiliError
 from ._constants import ENDPOINTS, FRAME_QUALITY_ID, USER_AGENT, WEB_HOME
 from ._http import HttpClient
 from ._signing import fetch_nav, sign_params
@@ -136,12 +136,12 @@ def _capture_frame(client: HttpClient, cdn_url: str, timestamp: float, output_pa
 def fetch_frame(client: HttpClient, bvid: str, cid: int, timestamp: float) -> bytes:
     """截取指定时刻的帧，返回内存中的 JPEG 字节。"""
     if shutil.which("ffmpeg") is None:
-        raise PolylensError("未检测到 ffmpeg：视频帧截取需要本机安装 ffmpeg 并加入 PATH")
+        raise BilibiliError("未检测到 ffmpeg：视频帧截取需要本机安装 ffmpeg 并加入 PATH")
     client.ensure_buvid()
     data = _fetch_playurl(client, bvid, cid)
     streams = _list_streams(data)
     if not streams:
-        raise PolylensError("播放信息里没有视频流")
+        raise BilibiliError("播放信息里没有视频流")
     stream = _pick_stream(streams, FRAME_QUALITY_ID)
 
     candidates: list[str] = []
@@ -150,7 +150,7 @@ def fetch_frame(client: HttpClient, bvid: str, cid: int, timestamp: float) -> by
         candidates.append(base)
     candidates.extend(stream.get("backupUrl") or stream.get("backup_url") or [])
     if not candidates:
-        raise PolylensError("视频流没有可用地址")
+        raise BilibiliError("视频流没有可用地址")
 
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
         output_path = Path(f.name)  # 占位路径，交给 ffmpeg 写

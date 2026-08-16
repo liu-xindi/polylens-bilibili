@@ -13,25 +13,25 @@ from urllib.request import Request, urlopen
 
 from .api._comments import fetch_comments, fetch_replies
 from .api._constants import SHORT_LINK_HOSTS, USER_AGENT
-from .api._danmaku import fetch_bullet_comments, top_by_heat
+from .api._danmaku import fetch_danmaku, top_by_heat
 from .api._frame import fetch_frame
 from .api._http import HttpClient
 from .api._login import check_qr_login, start_qr_login
 from .api._search import fetch_search
 from .api._signing import fetch_nav
 from .api._subtitles import fetch_subtitles
-from .api._video import build_content_info, cid_for_page, clip_duration, fetch_view
-from .errors import PolylensError
+from .api._video import build_video_info, cid_for_page, clip_duration, fetch_view
+from .errors import BilibiliError
 from .models import (
-    BulletComment,
     Comment,
-    ContentInfo,
+    Danmaku,
     LoginCheckResult,
     Page,
     QrLoginSession,
     ReplyThread,
     SearchItem,
     SubtitleEntry,
+    VideoInfo,
 )
 
 _BV_RE = re.compile(r"BV[0-9A-Za-z]+")
@@ -49,7 +49,7 @@ def _expand_short_link(url: str, timeout: int = 20) -> str:
             return resp.geturl()
     except (HTTPError, URLError) as exc:
         # 展开失败（含 412 风控、网络不可达等）：指向完整链接这条确定可行的路。
-        raise PolylensError(
+        raise BilibiliError(
             f"短链解析失败，无法展开 {url}；改用完整视频链接（含 BV 号）后重试。"
         ) from exc
 
@@ -60,7 +60,7 @@ def _extract_video_id(text: str) -> str:
         return bv.group(0)
     av = _AV_RE.search(text)
     if not av:
-        raise PolylensError(f"无法从输入解析 BV/av 号：{text}")
+        raise BilibiliError(f"无法从输入解析 BV/av 号：{text}")
     return f"av{av.group(1)}"
 
 
@@ -73,7 +73,7 @@ def _extract_page(text: str) -> int | None:
     return value if value >= 1 else None
 
 
-def resolve_target(url: str, page: int | None = None) -> tuple[str, int]:
+def resolve_video(url: str, page: int | None = None) -> tuple[str, int]:
     """把输入解析成 (视频号, 分段序号)。
 
     分段序号取值顺序：显式传入 > 链接里的 ?p=N > 第 1 段。
@@ -92,7 +92,7 @@ class BilibiliClient:
     def _view(self, video_id: str) -> dict[str, Any]:
         return fetch_view(self._http, _id_params(video_id))
 
-    def verify_login(self) -> bool | None:
+    def get_login_status(self) -> bool | None:
         """调平台接口核验 cookie 是否有效。None 表示无法验证。"""
         try:
             return fetch_nav(self._http).is_login
@@ -105,14 +105,14 @@ class BilibiliClient:
     def check_qr_login(self, key: str) -> LoginCheckResult:
         return check_qr_login(self._http, key)
 
-    def get_content_info(self, video_id: str, page: int = 1) -> ContentInfo:
-        info, _aid, _cid = build_content_info(self._view(video_id), page)
+    def get_video_info(self, video_id: str, page: int = 1) -> VideoInfo:
+        info, _aid, _cid = build_video_info(self._view(video_id), page)
         return info
 
     def get_comments(
         self, video_id: str, *, count: int, cursor: str | None = None
     ) -> Page[Comment]:
-        _info, aid, _cid = build_content_info(self._view(video_id))
+        _info, aid, _cid = build_video_info(self._view(video_id))
         return fetch_comments(self._http, aid, count=count, cursor=cursor)
 
     def get_comment_replies(
@@ -120,21 +120,21 @@ class BilibiliClient:
     ) -> list[ReplyThread]:
         if not comment_ids:
             return []
-        _info, aid, _cid = build_content_info(self._view(video_id))
+        _info, aid, _cid = build_video_info(self._view(video_id))
         return fetch_replies(
             self._http, aid, [str(c) for c in comment_ids], limit=limit, cursor=cursor
         )
 
-    def get_bullet_comments(
+    def get_danmaku(
         self, video_id: str, *, count: int, page: int = 1
-    ) -> list[BulletComment]:
+    ) -> list[Danmaku]:
         view = self._view(video_id)
-        bullets = fetch_bullet_comments(self._http, cid_for_page(view, page))
+        bullets = fetch_danmaku(self._http, cid_for_page(view, page))
         return top_by_heat(bullets, count)
 
     def get_subtitles(self, video_id: str, page: int = 1) -> list[SubtitleEntry]:
         view = self._view(video_id)
-        _info, aid, cid = build_content_info(view, page)
+        _info, aid, cid = build_video_info(view, page)
         return fetch_subtitles(self._http, aid, cid)
 
     def get_frame(self, video_id: str, *, timestamp: float, page: int = 1) -> bytes:
@@ -144,7 +144,7 @@ class BilibiliClient:
         at = max(0.0, float(timestamp))
         duration = clip_duration(view, cid)
         if duration is not None and at > duration:
-            raise PolylensError(f"请求的时间 {at:g} 秒超出视频时长（约 {duration:g} 秒）")
+            raise BilibiliError(f"请求的时间 {at:g} 秒超出视频时长（约 {duration:g} 秒）")
         return fetch_frame(self._http, bvid, cid, at)
 
     def search(
@@ -158,4 +158,4 @@ def _id_params(video_id: str) -> dict[str, Any]:
         return {"bvid": video_id}
     if video_id.startswith("av"):
         return {"aid": int(video_id[2:])}
-    raise PolylensError(f"无法识别的视频号：{video_id}")
+    raise BilibiliError(f"无法识别的视频号：{video_id}")

@@ -1,4 +1,4 @@
-"""视频元信息：从 view 接口数据提取并映射为 ContentInfo。
+"""视频元信息：从 view 接口数据提取并映射为 VideoInfo。
 
 多段视频：一个 BV 下含多段，每段有自己的 cid（弹幕/字幕/截帧按段取）。page 为 1 起的分段序号，
 对应链接里的 ?p=N。
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..errors import PolylensError
-from ..models import ContentInfo, to_local_time
+from ..errors import BilibiliError
+from ..models import VideoInfo, to_local_time
 from ._constants import ENDPOINTS
 from ._http import HttpClient
 
@@ -29,13 +29,13 @@ def _resolve_page(view: dict[str, Any], page: int) -> dict[str, Any]:
             return {
                 "cid": view["cid"], "page": 1, "part": None, "duration": view.get("duration"),
             }
-        raise PolylensError("无法确定视频分段信息")
+        raise BilibiliError("无法确定视频分段信息")
     for p in pages:
         if p.get("page") == page and p.get("cid"):
             return p
     if 1 <= page <= len(pages) and pages[page - 1].get("cid"):
         return pages[page - 1]
-    raise PolylensError(f"该视频共 {len(pages)} 段，没有第 {page} 段")
+    raise BilibiliError(f"该视频共 {len(pages)} 段，没有第 {page} 段")
 
 
 def cid_for_page(view: dict[str, Any], page: int) -> int:
@@ -67,8 +67,8 @@ def _summary_of(view: dict[str, Any]) -> str | None:
     return text or None
 
 
-def build_content_info(view: dict[str, Any], page: int = 1) -> tuple[ContentInfo, int, int]:
-    """从 view 数据构造 ContentInfo，同时返回 aid 和当前段 cid（供后续能力使用）。
+def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, int, int]:
+    """从 view 数据构造 VideoInfo，同时返回 aid 和当前段 cid（供后续能力使用）。
 
     标题/作者/统计为整片信息（全段共用）；分段信息只在多段视频上给出。
     """
@@ -81,7 +81,7 @@ def build_content_info(view: dict[str, Any], page: int = 1) -> tuple[ContentInfo
     is_multi = len(pages) > 1
     duration = selected.get("duration") if is_multi else view.get("duration")
 
-    info = ContentInfo(
+    info = VideoInfo(
         id=bvid,
         title=view.get("title", ""),
         author=(view.get("owner") or {}).get("name"),

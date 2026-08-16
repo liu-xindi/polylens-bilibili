@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..errors import PolylensError, RateLimitedError
+from ..errors import BilibiliError, RateLimitedError
 from ..models import Page, SearchItem, to_local_time
 from ._constants import ENDPOINTS, SEARCH_REFERER, SEARCH_RESULT_CAP
 from ._http import HttpClient, _RateLimited
@@ -35,7 +35,7 @@ def _parse_offset(cursor: str | None) -> int:
     try:
         offset = int(cursor)
     except ValueError:
-        raise PolylensError(
+        raise BilibiliError(
             f"无法识别的续取游标: {cursor!r}；请原样回传上次返回的 next_cursor"
         ) from None
     return max(0, offset)
@@ -101,7 +101,7 @@ def fetch_search(
     """
     query = keyword.strip()
     if not query:
-        raise PolylensError("搜索关键词不能为空")
+        raise BilibiliError("搜索关键词不能为空")
     size = max(1, count)
     offset = _parse_offset(cursor)
     page_num, skip = divmod(offset, size)
@@ -118,7 +118,7 @@ def fetch_search(
     # 响应回显了 pagesize 就核一遍, 把这个前提变成代码里自己会报警的不变量。
     echoed_page_size = (data or {}).get("pagesize")
     if echoed_page_size is not None and echoed_page_size != size:
-        raise PolylensError(
+        raise BilibiliError(
             f"平台未按请求的每页条数分页 (请求 {size}, 实为 {echoed_page_size}); "
             f"翻页换算的前提不再成立"
         )
@@ -128,7 +128,7 @@ def fetch_search(
         # 静默返回空页会把它伪装成"这批全是坏条目"。字符串最需要这道判定 ——
         # 它可切片可迭代, 逐字符都会被条目级的 isinstance 挡掉, 整页悄悄变空而游标照走。
         # 判在兜空值之前: "" 与 {} 也是形状变了, 不是"没有结果"。缺 result 才是没有结果。
-        raise PolylensError(f"搜索响应的 result 不是列表, 而是 {type(result).__name__}")
+        raise BilibiliError(f"搜索响应的 result 不是列表, 而是 {type(result).__name__}")
     raw_items = (result or [])[skip:]
     items = [item for raw in raw_items if (item := _to_search_item(raw)) is not None]
     # 游标按消费掉的原始条目数推进，不是按映射成功的条数：跳过一条坏数据后若只进 1，

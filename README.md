@@ -10,14 +10,14 @@
 
 | 工具 | 说明 | 登录 |
 |---|---|---|
-| `get_content_info` | 标题、作者、发布时间、简介、播放/点赞等统计 | 否 |
+| `get_video_info` | 标题、作者、发布时间、简介、播放/点赞等统计 | 否 |
 | `get_comments` | 主评论，热度序，游标续取，不含楼中楼 | 是 |
 | `get_comment_replies` | 楼中楼，按主评论 id 钻取 | 是 |
-| `get_bullet_comments` | 弹幕，按热度取一批，按时间轴返回 | 否 |
+| `get_danmaku` | 弹幕，按热度取一批，按时间轴返回 | 否 |
 | `get_subtitles` | 字幕，逐句，含起止秒数 | 是 |
 | `get_frame` | 截取指定时刻一帧，返回内联图片 | 是 |
 | `search` | 按关键词搜索视频，可翻页，每条附链接 | 否 |
-| `verify_login` | 联网核验本地凭据是否仍然有效 | — |
+| `get_login_status` | 联网核验本地凭据是否仍然有效 | — |
 | `set_cookie` | 写入 Cookie，即时生效 | — |
 | `logout` | 删除本地 Cookie | — |
 | `start_qr_login` · `check_qr_login` | 扫码登录 | — |

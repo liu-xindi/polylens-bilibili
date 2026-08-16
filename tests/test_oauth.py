@@ -20,8 +20,8 @@ def _run(coro):
     return anyio.run(lambda: coro)
 
 
-def _provider(tmp_path) -> oauth.PolylensOAuthProvider:
-    return oauth.PolylensOAuthProvider(
+def _provider(tmp_path) -> oauth.OAuthProvider:
+    return oauth.OAuthProvider(
         issuer_url="https://mcp.example.com",
         resource_url="https://mcp.example.com/mcp",
         store_path=tmp_path / "store.json",
@@ -47,7 +47,7 @@ def _params() -> AuthorizationParams:
     )
 
 
-async def _full_grant(p: oauth.PolylensOAuthProvider) -> tuple[str, OAuthClientInformationFull]:
+async def _full_grant(p: oauth.OAuthProvider) -> tuple[str, OAuthClientInformationFull]:
     """注册客户端 → authorize → grant_pending，返回 (授权码, client)。"""
     client = _client()
     await p.register_client(client)

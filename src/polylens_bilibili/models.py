@@ -83,7 +83,9 @@ def to_toon(name: str, items: list[Any], item_type: type) -> str:
     return toon_table(name, [asdict(it) for it in items], columns)
 
 
-class LoginStatus(StrEnum):
+class QrStatus(StrEnum):
+    """扫码登录的轮询状态。与"当前是否已登录"是两回事，后者见 BilibiliClient.get_login_status。"""
+
     WAITING = "waiting"   # 尚未扫码
     SCANNED = "scanned"   # 已扫，待手机确认
     EXPIRED = "expired"   # 二维码超时
@@ -98,7 +100,7 @@ class QrLoginSession:
 
 @dataclass(frozen=True, slots=True)
 class LoginCheckResult:
-    status: LoginStatus
+    status: QrStatus
     cookie: str = ""
 
 
@@ -158,7 +160,7 @@ class SubtitleEntry:
 
 
 @dataclass(slots=True)
-class BulletComment:
+class Danmaku:
     """一条弹幕。
 
     不带 id：弹幕之间无引用关系，平台内部 id 对消费端零效用。
@@ -170,7 +172,7 @@ class BulletComment:
     heat: int
 
 
-class ContentInfo(BaseModel):
+class VideoInfo(BaseModel):
     """视频元信息。字段恒在，无值为 null。"""
 
     id: str = Field(description="BV 号")

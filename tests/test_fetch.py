@@ -11,11 +11,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from polylens_bilibili.api._comments import fetch_comments, fetch_replies
-from polylens_bilibili.api._danmaku import fetch_bullet_comments
+from polylens_bilibili.api._danmaku import fetch_danmaku
 from polylens_bilibili.api._http import BilibiliHttpError, HttpClient, _RateLimited
 from polylens_bilibili.api._signing import NavInfo
 from polylens_bilibili.api._subtitles import fetch_subtitles
-from polylens_bilibili.errors import AuthRequiredError, PolylensError, RateLimitedError
+from polylens_bilibili.errors import AuthRequiredError, BilibiliError, RateLimitedError
 
 # ── 共用辅助 ────────────────────────────────────────────────────────────────
 
@@ -306,7 +306,7 @@ def test_fetch_subtitles_requires_login():
     client.get_json.assert_not_called()
 
 
-# ── fetch_bullet_comments ───────────────────────────────────────────────────
+# ── fetch_danmaku ───────────────────────────────────────────────────
 
 _DANMAKU_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <i>
@@ -315,18 +315,18 @@ _DANMAKU_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </i>"""
 
 
-def test_fetch_bullet_comments_delegates_to_parse():
+def test_fetch_danmaku_delegates_to_parse():
     client = MagicMock()
     client.get_bytes.return_value = _DANMAKU_XML.encode()
-    bullets = fetch_bullet_comments(client, cid=12345)
+    bullets = fetch_danmaku(client, cid=12345)
     assert len(bullets) == 2
     assert bullets[0].timestamp == 1.0  # 已排序
 
 
-def test_fetch_bullet_comments_url_includes_cid():
+def test_fetch_danmaku_url_includes_cid():
     client = MagicMock()
     client.get_bytes.return_value = b"<i></i>"
-    fetch_bullet_comments(client, cid=9999)
+    fetch_danmaku(client, cid=9999)
     assert "oid=9999" in client.get_bytes.call_args[0][0]
 
 
@@ -372,13 +372,13 @@ def test_get_json_keeps_data_when_voucher_accompanies_real_fields():
 
 
 def test_get_json_business_error_is_polylens_error():
-    """平台非 0 业务码上浮成 PolylensError，消息用平台原文，能被工具层接住。"""
+    """平台非 0 业务码上浮成 BilibiliError，消息用平台原文，能被工具层接住。"""
     client = _http()
     raw = json.dumps({"code": -400, "message": "请求错误"}).encode()
     with patch.object(client, "get_bytes", return_value=raw):
         with pytest.raises(BilibiliHttpError) as exc_info:
             client.get_json("/test")
-    assert isinstance(exc_info.value, PolylensError)
+    assert isinstance(exc_info.value, BilibiliError)
     assert "-400" in str(exc_info.value) and "请求错误" in str(exc_info.value)
 
 
@@ -443,7 +443,7 @@ def test_fetch_frame_without_ffmpeg_fails_fast(monkeypatch: pytest.MonkeyPatch) 
         def ensure_buvid(self) -> None:
             calls.append(1)
 
-    with pytest.raises(PolylensError, match="ffmpeg"):
+    with pytest.raises(BilibiliError, match="ffmpeg"):
         _frame.fetch_frame(cast(HttpClient, _Client()), "BV1xx", 0, 1.0)
     assert not calls  # 预检在任何网络动作之前
 

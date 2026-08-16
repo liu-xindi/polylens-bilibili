@@ -19,16 +19,16 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from .client import BilibiliClient, resolve_target
+from .client import BilibiliClient, resolve_video
 from .credentials import delete_cookie, load_cookie, save_cookie
-from .errors import PolylensError
+from .errors import BilibiliError
 from .models import (
-    BulletComment,
     Comment,
-    ContentInfo,
-    LoginStatus,
+    Danmaku,
+    QrStatus,
     SearchItem,
     SubtitleEntry,
+    VideoInfo,
     to_toon,
 )
 
@@ -47,7 +47,7 @@ _TOON_NOTE = (
 )
 
 
-class ContentInfoResult(ContentInfo):
+class VideoInfoResult(VideoInfo):
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
 
 
@@ -84,10 +84,10 @@ class CommentRepliesResult(BaseModel):
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
 
 
-class BulletCommentsResult(BaseModel):
+class DanmakuResult(BaseModel):
     video_id: str = Field(description="解析出的视频号")
     count: int = Field(description="本次返回的弹幕条数")
-    bullet_comments: str = Field(
+    danmaku: str = Field(
         description=(
             f"{_TOON_NOTE} 列为 content,timestamp,heat。timestamp 是视频内秒数，"
             "heat 是热度档位（约 1-10），数值越高越热门，同档内不再细分。"
@@ -120,7 +120,7 @@ class SearchResult(BaseModel):
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
 
 
-class LoginStatusResult(BaseModel):
+class LoginStateResult(BaseModel):
     is_login: bool | None = Field(
         description="true 已登录，false 未登录，null 表示无法验证（网络或平台异常）"
     )
@@ -201,13 +201,13 @@ _SERVER_INSTRUCTIONS = (
 )
 
 _STATUS_MSG = {
-    LoginStatus.WAITING: (
+    QrStatus.WAITING: (
         "尚未扫码，用 B站 App 扫描二维码。等用户确认已扫码后再调用本工具，不反复轮询。"
     ),
-    LoginStatus.SCANNED: (
+    QrStatus.SCANNED: (
         "已扫码，在手机上确认登录。等用户确认完成后再调用本工具，不反复轮询。"
     ),
-    LoginStatus.EXPIRED: "二维码已过期，重新调用 start_qr_login 获取新二维码。",
+    QrStatus.EXPIRED: "二维码已过期，重新调用 start_qr_login 获取新二维码。",
 }
 
 _READS_PLATFORM = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
@@ -244,14 +244,14 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
-    def get_content_info(
+    def get_video_info(
         url: Annotated[str, Field(description=_URL_DESC)],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
-    ) -> ContentInfoResult:
+    ) -> VideoInfoResult:
         """获取视频的标题、作者、发布时间、简介与各项统计。"""
-        video_id, part = resolve_target(url, page)
-        info = _client().get_content_info(video_id, part)
-        return ContentInfoResult(**info.model_dump())
+        video_id, part = resolve_video(url, page)
+        info = _client().get_video_info(video_id, part)
+        return VideoInfoResult(**info.model_dump())
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
@@ -269,7 +269,7 @@ def create_server(
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentsResult:
         """获取视频的主评论，不含楼中楼。需要登录。"""
-        video_id, _ = resolve_target(url)
+        video_id, _ = resolve_video(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor)
         return CommentsResult(
             video_id=video_id,
@@ -299,7 +299,7 @@ def create_server(
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentRepliesResult:
         """按主评论 id 钻取楼中楼。需要登录。"""
-        video_id, _ = resolve_target(url)
+        video_id, _ = resolve_video(url)
         threads = _client().get_comment_replies(
             video_id, comment_ids=comment_ids, limit=limit, cursor=cursor
         )
@@ -318,26 +318,26 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
-    def get_bullet_comments(
+    def get_danmaku(
         url: Annotated[str, Field(description=_URL_DESC)],
         count: Annotated[
             int,
             Field(
                 description=(
                     "想要的弹幕条数。从整片弹幕里取最热的这么多条，结果仍按时间轴排序；"
-                    "达到或超过弹幕总数即返回全部。总数见 get_content_info 的 danmaku_count。"
+                    "达到或超过弹幕总数即返回全部。总数见 get_video_info 的 danmaku_count。"
                 )
             ),
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
-    ) -> BulletCommentsResult:
+    ) -> DanmakuResult:
         """获取视频弹幕，按热度取一批，仍按时间轴排序。"""
-        video_id, part = resolve_target(url, page)
-        bullets = _client().get_bullet_comments(video_id, count=count, page=part)
-        return BulletCommentsResult(
+        video_id, part = resolve_video(url, page)
+        bullets = _client().get_danmaku(video_id, count=count, page=part)
+        return DanmakuResult(
             video_id=video_id,
             count=len(bullets),
-            bullet_comments=to_toon("bullet_comments", bullets, BulletComment),
+            danmaku=to_toon("danmaku", bullets, Danmaku),
         )
 
     @mcp.tool(annotations=_READS_PLATFORM)
@@ -347,7 +347,7 @@ def create_server(
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> SubtitlesResult:
         """获取视频字幕，逐句返回。字幕为 AI 生成，可能有误。需要登录。"""
-        video_id, part = resolve_target(url, page)
+        video_id, part = resolve_video(url, page)
         entries = _client().get_subtitles(video_id, part)
         return SubtitlesResult(
             video_id=video_id,
@@ -367,7 +367,7 @@ def create_server(
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> list[ImageContent | TextContent]:
         """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录，需本机安装 ffmpeg。"""
-        video_id, part = resolve_target(url, page)
+        video_id, part = resolve_video(url, page)
         jpeg = _client().get_frame(video_id, timestamp=timestamp, page=part)
         meta = {"video_id": video_id, "page": part}
         return [
@@ -400,9 +400,9 @@ def create_server(
         )
 
     @mcp.tool(annotations=_READS_PLATFORM)
-    def verify_login() -> LoginStatusResult:
+    def get_login_status() -> LoginStateResult:
         """查询当前是否已登录（联网核验本地凭据是否仍然有效）。"""
-        return LoginStatusResult(is_login=_client().verify_login())
+        return LoginStateResult(is_login=_client().get_login_status())
 
     @mcp.tool(annotations=_LOCAL_ONLY)
     def set_cookie(
@@ -414,11 +414,11 @@ def create_server(
         """写入 B站登录 Cookie，即时生效。"""
         value = cookie.strip()
         if not value:
-            raise PolylensError("cookie 不能为空；清除登录用 logout")
+            raise BilibiliError("cookie 不能为空；清除登录用 logout")
         path = save_cookie(value)
         return CookieSavedResult(
             file=str(path),
-            message=f"Cookie 已写入 {path}，即时生效；可调 verify_login 确认。",
+            message=f"Cookie 已写入 {path}，即时生效；可调 get_login_status 确认。",
         )
 
     @mcp.tool(annotations=_LOCAL_ONLY)
@@ -451,7 +451,7 @@ def create_server(
     ) -> QrCheckResult:
         """查询扫码结果。每次只查一次，成功时凭据自动写盘。"""
         result = BilibiliClient().check_qr_login(key)
-        if result.status is LoginStatus.SUCCESS:
+        if result.status is QrStatus.SUCCESS:
             path = save_cookie(result.cookie)
             return QrCheckResult(
                 status="success",

@@ -52,7 +52,7 @@ class _Pending:
     created_at: float = field(default_factory=time.time)
 
 
-class PolylensOAuthProvider(
+class OAuthProvider(
     OAuthAuthorizationServerProvider[AuthorizationCode, RefreshToken, AccessToken]
 ):
     """令牌只存哈希。"""
@@ -200,13 +200,13 @@ def _strip_token(model: AccessToken | RefreshToken) -> dict[str, Any]:
 
 
 # ── 接到 FastMCP 上 ─────────────────────────────────────────────────────────
-def build_oauth(public_url: str) -> tuple[dict[str, Any], PolylensOAuthProvider]:
+def build_oauth(public_url: str) -> tuple[dict[str, Any], OAuthProvider]:
     """返回 (传给 FastMCP 构造器的 auth kwargs, provider)。
 
     服务跑在反代后，进来的 Host 是公网域名，需列入 allowed_hosts，否则库的 DNS 重绑定防护会拦下。
     """
     base = public_url.rstrip("/")
-    provider = PolylensOAuthProvider(issuer_url=base, resource_url=f"{base}/mcp")
+    provider = OAuthProvider(issuer_url=base, resource_url=f"{base}/mcp")
     host = urlparse(base).hostname or "localhost"
     kwargs: dict[str, Any] = {
         "auth": AuthSettings(
@@ -225,7 +225,7 @@ def build_oauth(public_url: str) -> tuple[dict[str, Any], PolylensOAuthProvider]
     return kwargs, provider
 
 
-def register_consent_route(mcp: Any, provider: PolylensOAuthProvider, auth_secret: str) -> None:
+def register_consent_route(mcp: Any, provider: OAuthProvider, auth_secret: str) -> None:
     """在 FastMCP 上挂 /consent 页：机主输入口令，正确则发授权码回跳客户端。"""
     from starlette.requests import Request
     from starlette.responses import HTMLResponse, RedirectResponse, Response

@@ -8,11 +8,11 @@ import time
 import pytest
 
 from polylens_bilibili.models import (
-    BulletComment,
     Comment,
-    ContentInfo,
+    Danmaku,
     SearchItem,
     SubtitleEntry,
+    VideoInfo,
     to_local_time,
     to_toon,
     toon_table,
@@ -112,11 +112,11 @@ def test_comments_toon_parent_id_column_stays_when_batch_has_none() -> None:
     assert "parent_id" in head
 
 
-def test_bullets_toon_keeps_zero_timestamp() -> None:
+def test_danmaku_toon_keeps_zero_timestamp() -> None:
     """弹幕 timestamp=0（视频第 0 秒）是真信号，照常写出。"""
-    bullets = [BulletComment(content="x", timestamp=0.0, heat=5)]
-    out = to_toon("bullet_comments", bullets, BulletComment)
-    assert out == "bullet_comments[1]{content,timestamp,heat}:\n  x,0,5"
+    bullets = [Danmaku(content="x", timestamp=0.0, heat=5)]
+    out = to_toon("danmaku", bullets, Danmaku)
+    assert out == "danmaku[1]{content,timestamp,heat}:\n  x,0,5"
 
 
 def test_subtitles_toon_shape() -> None:
@@ -150,12 +150,12 @@ def test_to_toon_empty_list_still_declares_columns() -> None:
     assert to_toon("subtitles", [], SubtitleEntry) == "subtitles[0]{start,end,content}:"
 
 
-# ── ContentInfo ─────────────────────────────────────────────────────────────
+# ── VideoInfo ─────────────────────────────────────────────────────────────
 
 
-def test_content_info_keeps_all_fields_including_none_and_zero() -> None:
+def test_video_info_keeps_all_fields_including_none_and_zero() -> None:
     """字段恒在：没有的项是 null，为 0 的项照常给出 0。"""
-    d = ContentInfo(id="BV1", title="t", view_count=0).model_dump()
+    d = VideoInfo(id="BV1", title="t", view_count=0).model_dump()
     assert d["view_count"] == 0
     assert d["author"] is None
     assert d["parts"] is None

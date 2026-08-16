@@ -11,13 +11,13 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
-from ..errors import PolylensError
+from ..errors import BilibiliError
 from ._constants import API_BASE, USER_AGENT, WEB_HOME
 
 _DEFAULT_REFERER = WEB_HOME
 
 
-class BilibiliHttpError(PolylensError):
+class BilibiliHttpError(BilibiliError):
     """平台返回非 0 业务码。消息为平台原文，不作解释。"""
 
 

@@ -13,23 +13,23 @@ from mcp.shared.memory import create_connected_server_and_client_session
 from polylens_bilibili import server as server_mod
 from polylens_bilibili.errors import AuthRequiredError
 from polylens_bilibili.models import (
-    BulletComment,
     Comment,
-    ContentInfo,
+    Danmaku,
     LoginCheckResult,
-    LoginStatus,
     Page,
     QrLoginSession,
+    QrStatus,
     ReplyThread,
     SearchItem,
     SubtitleEntry,
+    VideoInfo,
 )
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 _TOOL_NAMES = {
-    "get_content_info", "get_comments", "get_comment_replies", "get_bullet_comments",
+    "get_video_info", "get_comments", "get_comment_replies", "get_danmaku",
     "get_subtitles", "get_frame", "search",
-    "verify_login", "set_cookie", "logout", "start_qr_login", "check_qr_login",
+    "get_login_status", "set_cookie", "logout", "start_qr_login", "check_qr_login",
 }
 
 
@@ -121,7 +121,7 @@ def test_content_tools_declare_url_and_page() -> None:
             return {t.name: t.inputSchema for t in (await client.list_tools()).tools}
 
     schemas = _run(scenario)
-    for name in ("get_content_info", "get_bullet_comments", "get_subtitles", "get_frame"):
+    for name in ("get_video_info", "get_danmaku", "get_subtitles", "get_frame"):
         assert "page" in schemas[name]["properties"], name
     # 评论按整片取，与分段无关
     for name in ("get_comments", "get_comment_replies"):
@@ -132,10 +132,10 @@ def test_content_tools_declare_url_and_page() -> None:
 # ── 内容类工具的返回结构 ────────────────────────────────────────────────────
 
 
-def test_get_content_info_returns_named_fields() -> None:
-    info = ContentInfo(id="BV1xx", title="标题", author="up主", view_count=0)
-    with _with_client(get_content_info=info):
-        payload = _payload("get_content_info", {"url": BV_URL})
+def test_get_video_info_returns_named_fields() -> None:
+    info = VideoInfo(id="BV1xx", title="标题", author="up主", view_count=0)
+    with _with_client(get_video_info=info):
+        payload = _payload("get_video_info", {"url": BV_URL})
     assert payload["id"] == "BV1xx"
     assert payload["title"] == "标题"
     assert payload["view_count"] == 0  # 0 是真实值，照常给出
@@ -187,12 +187,12 @@ def test_get_comment_replies_groups_by_thread() -> None:
     assert results[0]["replies"].startswith("replies[1]{")
 
 
-def test_get_bullet_comments_returns_toon() -> None:
-    bullets = [BulletComment(content="弹", timestamp=0.0, heat=7)]
-    with _with_client(get_bullet_comments=bullets):
-        payload = _payload("get_bullet_comments", {"url": BV_URL, "count": 1})
+def test_get_danmaku_returns_toon() -> None:
+    bullets = [Danmaku(content="弹", timestamp=0.0, heat=7)]
+    with _with_client(get_danmaku=bullets):
+        payload = _payload("get_danmaku", {"url": BV_URL, "count": 1})
     assert payload["count"] == 1
-    assert payload["bullet_comments"] == "bullet_comments[1]{content,timestamp,heat}:\n  弹,0,7"
+    assert payload["danmaku"] == "danmaku[1]{content,timestamp,heat}:\n  弹,0,7"
 
 
 def test_get_subtitles_returns_toon() -> None:
@@ -266,9 +266,9 @@ def test_start_qr_login_returns_inline_qr_image() -> None:
 
 
 @pytest.mark.parametrize("answer", [True, False, None])
-def test_verify_login_passes_through_three_states(answer: bool | None) -> None:
-    with _with_client(verify_login=answer):
-        assert _payload("verify_login")["is_login"] is answer
+def test_get_login_status_passes_through_three_states(answer: bool | None) -> None:
+    with _with_client(get_login_status=answer):
+        assert _payload("get_login_status")["is_login"] is answer
 
 
 def test_set_cookie_writes_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,7 +301,7 @@ def test_logout_reports_whether_credential_existed(
 def test_check_qr_login_success_saves_cookie(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "cookie"
     monkeypatch.setattr("polylens_bilibili.credentials.cookie_file_path", lambda: path)
-    result = LoginCheckResult(status=LoginStatus.SUCCESS, cookie="SESSDATA=ok")
+    result = LoginCheckResult(status=QrStatus.SUCCESS, cookie="SESSDATA=ok")
     with patch.object(server_mod.BilibiliClient, "check_qr_login", lambda self, key: result):
         payload = _payload("check_qr_login", {"key": "k1"})
     assert payload["status"] == "success"
@@ -311,13 +311,13 @@ def test_check_qr_login_success_saves_cookie(tmp_path, monkeypatch: pytest.Monke
 @pytest.mark.parametrize(
     ("status", "hint"),
     [
-        (LoginStatus.WAITING, "尚未扫码"),
-        (LoginStatus.SCANNED, "确认登录"),
-        (LoginStatus.EXPIRED, "已过期"),
+        (QrStatus.WAITING, "尚未扫码"),
+        (QrStatus.SCANNED, "确认登录"),
+        (QrStatus.EXPIRED, "已过期"),
     ],
 )
 def test_check_qr_login_pending_states_tell_next_step(
-    status: LoginStatus, hint: str
+    status: QrStatus, hint: str
 ) -> None:
     result = LoginCheckResult(status=status)
     with patch.object(server_mod.BilibiliClient, "check_qr_login", lambda self, key: result):
@@ -330,7 +330,7 @@ def test_check_qr_login_pending_states_tell_next_step(
 
 
 def test_unparsable_url_is_tool_error() -> None:
-    result = _call("get_content_info", {"url": "https://example.com/x"})
+    result = _call("get_video_info", {"url": "https://example.com/x"})
     assert result.isError
     assert "BV/av" in result.content[0].text
 
@@ -353,7 +353,7 @@ def test_auth_required_surfaces_with_login_hint() -> None:
 @pytest.mark.parametrize(
     ("tool", "args", "behaviour"),
     [
-        ("get_content_info", {"url": BV_URL}, {"get_content_info": ContentInfo(id="B", title="t")}),
+        ("get_video_info", {"url": BV_URL}, {"get_video_info": VideoInfo(id="B", title="t")}),
         ("get_comments", {"url": BV_URL, "count": 1}, {"get_comments": Page(items=[])}),
         ("get_subtitles", {"url": BV_URL}, {"get_subtitles": []}),
         ("search", {"query": "x", "count": 1}, {"search": Page(items=[])}),
@@ -367,5 +367,5 @@ def test_content_tools_attach_elapsed_s(
 
 
 def test_login_tools_have_no_elapsed_s() -> None:
-    with _with_client(verify_login=True):
-        assert "elapsed_s" not in _payload("verify_login")
+    with _with_client(get_login_status=True):
+        assert "elapsed_s" not in _payload("get_login_status")
