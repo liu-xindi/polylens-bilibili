@@ -259,46 +259,87 @@ def register_consent_route(mcp: Any, provider: OAuthProvider, auth_secret: str) 
     mcp.custom_route("/consent", methods=["GET", "POST"])(consent)
 
 
+# 配色取自 shadcn 的 claude 主题（oklch 语义变量），只搬同意页用得上的那十来个。
+# 主题在浅色下的 destructive 是近黑的 oklch(0.19 0.00 106.59)，用作错误提示与正文难以区分，
+# 故两个模式统一用它的深色值（红）。
+# background 与 card 在主题里同色，卡片靠 border 与 shadow 分层，不靠底色差。
 _PAGE_CSS = """
-:root { color-scheme: light dark; }
+:root {
+  color-scheme: light dark;
+  --background: oklch(0.98 0.01 95.10);
+  --foreground: oklch(0.34 0.03 95.72);
+  --card: oklch(0.98 0.01 95.10);
+  --card-foreground: oklch(0.19 0.00 106.59);
+  --primary: oklch(0.62 0.14 39.04);
+  --primary-foreground: oklch(1.00 0 0);
+  --muted-foreground: oklch(0.61 0.01 97.42);
+  --border: oklch(0.88 0.01 97.36);
+  --input: oklch(0.76 0.02 98.35);
+  --ring: oklch(0.59 0.17 253.06);
+  --destructive: oklch(0.64 0.21 25.33);
+  --radius: 0.5rem;
+  --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.27 0.00 106.64);
+    --foreground: oklch(0.81 0.01 93.01);
+    --card: oklch(0.27 0.00 106.64);
+    --card-foreground: oklch(0.98 0.01 95.10);
+    --primary: oklch(0.67 0.13 38.76);
+    --muted-foreground: oklch(0.77 0.02 99.07);
+    --border: oklch(0.36 0.01 106.89);
+    --input: oklch(0.43 0.01 100.22);
+    --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.36), 0px 4px 6px -2px hsl(0 0% 0% / 0.36);
+  }
+}
 * { box-sizing: border-box; }
 body {
   margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC",sans-serif;
-  background:#f5f6f8; color:#1c1e21;
+  background:var(--background); color:var(--foreground);
 }
-@media (prefers-color-scheme: dark){ body{ background:#16181c; color:#e8eaed; } }
 .card {
-  width:100%; max-width:380px; margin:24px; padding:32px 28px;
-  background:#fff; border-radius:16px; box-shadow:0 8px 30px rgba(0,0,0,.08);
-}
-@media (prefers-color-scheme: dark){
-  .card{ background:#1f2228; box-shadow:0 8px 30px rgba(0,0,0,.4); }
+  width:100%; max-width:400px; margin:24px; padding:32px 28px;
+  background:var(--card); color:var(--card-foreground);
+  border:1px solid var(--border); border-radius:calc(var(--radius) + 4px);
+  box-shadow:var(--shadow-lg);
 }
 .brand {
-  font-size:13px; letter-spacing:.12em; text-transform:uppercase;
-  color:#8a8f98; margin-bottom:18px;
+  font-size:12px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--muted-foreground); margin-bottom:20px;
 }
-h1 { font-size:20px; margin:0 0 6px; font-weight:650; }
-.sub { font-size:14px; color:#6b7280; margin:0 0 24px; line-height:1.5; }
-.client { font-weight:600; color:#2b6cf6; }
-label { display:block; font-size:13px; color:#6b7280; margin-bottom:8px; }
+h1 { font-size:20px; margin:0 0 6px; font-weight:600; letter-spacing:-0.01em; }
+.sub { font-size:14px; color:var(--muted-foreground); margin:0 0 24px; line-height:1.6; }
+.client { font-weight:600; color:var(--primary); }
+label { display:block; font-size:13px; font-weight:500; margin-bottom:8px; }
 input[type=password]{
-  width:100%; padding:12px 14px; font-size:15px; border:1px solid #d7dbe0;
-  border-radius:10px; background:#fbfcfd; color:inherit; outline:none;
+  width:100%; padding:10px 13px; font-size:14px; font-family:inherit;
+  border:1px solid var(--input); border-radius:var(--radius);
+  background:transparent; color:inherit; outline:none;
+  transition:border-color .15s, box-shadow .15s;
 }
-input[type=password]:focus{ border-color:#2b6cf6; }
-@media (prefers-color-scheme: dark){
-  input[type=password]{ background:#171a1f; border-color:#2c313a; }
+input[type=password]::placeholder{ color:var(--muted-foreground); }
+input[type=password]:focus{
+  border-color:var(--ring);
+  box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 25%, transparent);
 }
 button {
-  width:100%; margin-top:18px; padding:12px; font-size:15px; font-weight:600;
-  color:#fff; background:#2b6cf6; border:none; border-radius:10px; cursor:pointer;
+  width:100%; margin-top:20px; padding:10px; font-size:14px; font-weight:500;
+  font-family:inherit; color:var(--primary-foreground); background:var(--primary);
+  border:none; border-radius:var(--radius); cursor:pointer;
+  transition:background-color .15s;
 }
-button:hover{ background:#1f5be0; }
-.err { margin-top:14px; font-size:13px; color:#e5484d; }
-.notice { font-size:15px; color:#6b7280; line-height:1.6; text-align:center; }
-.foot { margin-top:22px; font-size:12px; color:#9aa0a6; text-align:center; }
+button:hover{ background:color-mix(in oklch, var(--primary) 90%, transparent); }
+button:focus-visible{
+  outline:none; box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 35%, transparent);
+}
+.err { margin-top:14px; font-size:13px; color:var(--destructive); }
+.notice { font-size:15px; color:var(--muted-foreground); line-height:1.6; text-align:center; }
+.foot {
+  margin-top:24px; font-size:12px; color:var(--muted-foreground);
+  text-align:center; opacity:.8;
+}
 """
 
 
