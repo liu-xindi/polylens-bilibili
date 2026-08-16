@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+build/
+
+# uv
+# uv.lock 提交，不忽略
+
+# 测试 / 类型
+.pytest_cache/
+.ruff_cache/
+
+# 本地工具索引/配置
+.codegraph/
+.cursor/
+.vscode/
+.mcp.json
+
+# AI 助手规则，本地保留
+/AGENTS.md
+/CLAUDE.md
