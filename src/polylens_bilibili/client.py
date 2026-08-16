@@ -1,0 +1,161 @@
+"""能力入口：把工具层的请求翻译成对 api 层的调用。
+
+登录判断不在这里集中做，各能力在自己取数据的路径上判（见 api 下对应模块）。
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+from .api._comments import fetch_comments, fetch_replies
+from .api._constants import SHORT_LINK_HOSTS, USER_AGENT
+from .api._danmaku import fetch_bullet_comments, top_by_heat
+from .api._frame import fetch_frame
+from .api._http import HttpClient
+from .api._login import check_qr_login, start_qr_login
+from .api._search import fetch_search
+from .api._signing import fetch_nav
+from .api._subtitles import fetch_subtitles
+from .api._video import build_content_info, cid_for_page, clip_duration, fetch_view
+from .errors import PolylensError
+from .models import (
+    BulletComment,
+    Comment,
+    ContentInfo,
+    LoginCheckResult,
+    Page,
+    QrLoginSession,
+    ReplyThread,
+    SearchItem,
+    SubtitleEntry,
+)
+
+_BV_RE = re.compile(r"BV[0-9A-Za-z]+")
+_AV_RE = re.compile(r"\bav(\d+)\b", re.IGNORECASE)
+_PAGE_RE = re.compile(r"[?&]p=(\d+)")
+
+
+def _expand_short_link(url: str, timeout: int = 20) -> str:
+    """b23.tv 之类的短链展开成完整链接；不是短链则原样返回。"""
+    if urlparse(url).netloc not in SHORT_LINK_HOSTS:
+        return url
+    req = Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return resp.geturl()
+    except (HTTPError, URLError) as exc:
+        # 展开失败（含 412 风控、网络不可达等）：指向完整链接这条确定可行的路。
+        raise PolylensError(
+            f"短链解析失败，无法展开 {url}；改用完整视频链接（含 BV 号）后重试。"
+        ) from exc
+
+
+def _extract_video_id(text: str) -> str:
+    bv = _BV_RE.search(text)
+    if bv:
+        return bv.group(0)
+    av = _AV_RE.search(text)
+    if not av:
+        raise PolylensError(f"无法从输入解析 BV/av 号：{text}")
+    return f"av{av.group(1)}"
+
+
+def _extract_page(text: str) -> int | None:
+    """从链接里取分段序号 ?p=N。取不到或不是正整数时返回 None。"""
+    m = _PAGE_RE.search(text)
+    if not m:
+        return None
+    value = int(m.group(1))
+    return value if value >= 1 else None
+
+
+def resolve_target(url: str, page: int | None = None) -> tuple[str, int]:
+    """把输入解析成 (视频号, 分段序号)。
+
+    分段序号取值顺序：显式传入 > 链接里的 ?p=N > 第 1 段。
+    """
+    expanded = _expand_short_link(url)
+    chosen = page if page is not None else _extract_page(expanded)
+    return _extract_video_id(expanded), max(1, chosen or 1)
+
+
+class BilibiliClient:
+    """一次工具调用的作用域内共用一个 HTTP 会话。"""
+
+    def __init__(self, cookie: str = "") -> None:
+        self._http = HttpClient(cookie=cookie)
+
+    def _view(self, video_id: str) -> dict[str, Any]:
+        return fetch_view(self._http, _id_params(video_id))
+
+    def verify_login(self) -> bool | None:
+        """调平台接口核验 cookie 是否有效。None 表示无法验证。"""
+        try:
+            return fetch_nav(self._http).is_login
+        except Exception:
+            return None
+
+    def start_qr_login(self) -> QrLoginSession:
+        return start_qr_login(self._http)
+
+    def check_qr_login(self, key: str) -> LoginCheckResult:
+        return check_qr_login(self._http, key)
+
+    def get_content_info(self, video_id: str, page: int = 1) -> ContentInfo:
+        info, _aid, _cid = build_content_info(self._view(video_id), page)
+        return info
+
+    def get_comments(
+        self, video_id: str, *, count: int, cursor: str | None = None
+    ) -> Page[Comment]:
+        _info, aid, _cid = build_content_info(self._view(video_id))
+        return fetch_comments(self._http, aid, count=count, cursor=cursor)
+
+    def get_comment_replies(
+        self, video_id: str, *, comment_ids: list[str], limit: int, cursor: str | None = None
+    ) -> list[ReplyThread]:
+        if not comment_ids:
+            return []
+        _info, aid, _cid = build_content_info(self._view(video_id))
+        return fetch_replies(
+            self._http, aid, [str(c) for c in comment_ids], limit=limit, cursor=cursor
+        )
+
+    def get_bullet_comments(
+        self, video_id: str, *, count: int, page: int = 1
+    ) -> list[BulletComment]:
+        view = self._view(video_id)
+        bullets = fetch_bullet_comments(self._http, cid_for_page(view, page))
+        return top_by_heat(bullets, count)
+
+    def get_subtitles(self, video_id: str, page: int = 1) -> list[SubtitleEntry]:
+        view = self._view(video_id)
+        _info, aid, cid = build_content_info(view, page)
+        return fetch_subtitles(self._http, aid, cid)
+
+    def get_frame(self, video_id: str, *, timestamp: float, page: int = 1) -> bytes:
+        view = self._view(video_id)
+        bvid = str(view.get("bvid") or video_id)
+        cid = cid_for_page(view, page)
+        at = max(0.0, float(timestamp))
+        duration = clip_duration(view, cid)
+        if duration is not None and at > duration:
+            raise PolylensError(f"请求的时间 {at:g} 秒超出视频时长（约 {duration:g} 秒）")
+        return fetch_frame(self._http, bvid, cid, at)
+
+    def search(
+        self, *, query: str, count: int, cursor: str | None = None
+    ) -> Page[SearchItem]:
+        return fetch_search(self._http, query, count=count, cursor=cursor)
+
+
+def _id_params(video_id: str) -> dict[str, Any]:
+    if video_id.startswith("BV"):
+        return {"bvid": video_id}
+    if video_id.startswith("av"):
+        return {"aid": int(video_id[2:])}
+    raise PolylensError(f"无法识别的视频号：{video_id}")
