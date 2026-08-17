@@ -89,7 +89,7 @@ POLYLENS_BILIBILI_AUTH_SECRET='<强口令>' \
 uv run polylens-bilibili
 ```
 
-服务只以明文 HTTP 监听，不处理 TLS；由反向代理终结 TLS 后转发到监听端口。监听地址保持默认的回环地址，让反向代理成为唯一入口。
+服务以明文 HTTP 监听，不处理 TLS。
 
 在 claude.ai 添加连接器：URL 填 `https://example.com/mcp`，经 OAuth 授权后在同意页输入机主口令，仅首次需要。
 
