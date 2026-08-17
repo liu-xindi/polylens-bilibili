@@ -262,6 +262,8 @@ def register_consent_route(mcp: Any, provider: OAuthProvider, auth_secret: str) 
 # 配色取自 shadcn 的 claude 主题（oklch 语义变量），只搬同意页用得上的那十来个。
 # 主题在浅色下的 destructive 是近黑的 oklch(0.19 0.00 106.59)，用作错误提示与正文难以区分，
 # 故两个模式统一用它的深色值（红）。
+# 主题的 ring 是蓝色 oklch(0.59 0.17 253.06)，落在这一页会是唯一的冷色，故未采用：
+# 聚焦环用 primary 着色。
 # background 与 card 在主题里同色，卡片靠 border 与 shadow 分层，不靠底色差。
 _PAGE_CSS = """
 :root {
@@ -275,7 +277,6 @@ _PAGE_CSS = """
   --muted-foreground: oklch(0.61 0.01 97.42);
   --border: oklch(0.88 0.01 97.36);
   --input: oklch(0.76 0.02 98.35);
-  --ring: oklch(0.59 0.17 253.06);
   --destructive: oklch(0.64 0.21 25.33);
   --radius: 0.5rem;
   --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
@@ -321,8 +322,8 @@ input[type=password]{
 }
 input[type=password]::placeholder{ color:var(--muted-foreground); }
 input[type=password]:focus{
-  border-color:var(--ring);
-  box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 25%, transparent);
+  border-color:var(--primary);
+  box-shadow:0 0 0 3px color-mix(in oklch, var(--primary) 25%, transparent);
 }
 button {
   width:100%; margin-top:20px; padding:10px; font-size:14px; font-weight:500;
@@ -332,7 +333,7 @@ button {
 }
 button:hover{ background:color-mix(in oklch, var(--primary) 90%, transparent); }
 button:focus-visible{
-  outline:none; box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 35%, transparent);
+  outline:none; box-shadow:0 0 0 3px color-mix(in oklch, var(--primary) 35%, transparent);
 }
 .err { margin-top:14px; font-size:13px; color:var(--destructive); }
 .notice { font-size:15px; color:var(--muted-foreground); line-height:1.6; text-align:center; }

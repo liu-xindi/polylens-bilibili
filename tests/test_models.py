@@ -149,14 +149,14 @@ def test_search_items_toon_columns_are_fixed() -> None:
         "results",
         [
             SearchItem(title="t1", url="u1", author="甲", published_at=None,
-                       duration=None, view_count=9, danmaku_count=None),
+                       duration_sec=None, view_count=9, danmaku_count=None),
             SearchItem(title="t2", url="u2", author=None, published_at=None,
-                       duration=None, view_count=None, danmaku_count=None),
+                       duration_sec=None, view_count=None, danmaku_count=None),
         ],
         SearchItem,
     )
     assert out == (
-        "results[2]{title,url,author,published_at,duration,view_count,danmaku_count}:\n"
+        "results[2]{title,url,author,published_at,duration_sec,view_count,danmaku_count}:\n"
         "  t1,u1,甲,,,9,\n"
         "  t2,u2,,,,,"
     )
@@ -179,7 +179,7 @@ def test_video_info_keeps_all_fields_including_none_and_zero() -> None:
                       "duration_sec", "total_duration_sec", "view_count", "danmaku_count_total",
                       "comment_count",
                       "like_count", "favorite_count", "share_count", "coin_count",
-                      "cover_url", "part_count", "category_id", "category_name",
+                      "cover_url", "part_count", "category_id",
                       "current_page", "current_part"}
 
 

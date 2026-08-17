@@ -108,11 +108,10 @@ def test_build_video_info_url_shape():
 
 
 def test_build_video_info_category_and_duration():
-    info, _, _ = build_video_info(_view(duration=120, videos=3, tid=17, tname="游戏"))
+    info, _, _ = build_video_info(_view(duration=120, videos=3, tid=17))
     assert info.duration_sec == 120
     assert info.part_count == 3
     assert info.category_id == 17
-    assert info.category_name == "游戏"
 
 
 def test_build_video_info_single_part_has_no_part_fields():

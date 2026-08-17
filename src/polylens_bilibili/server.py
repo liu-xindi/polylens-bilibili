@@ -32,6 +32,7 @@ from .models import (
     VideoInfo,
     VideoPart,
     to_toon,
+    toon_columns,
 )
 
 # ── 参数说明 ────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ class CommentsResult(BaseModel):
     count: int = Field(description="本批返回的评论条数")
     comments: str = Field(
         description=(
-            f"{_TOON_NOTE} 列为 id,author,content,like_count,reply_count,parent_id,created_at。"
+            f"{_TOON_NOTE} 列为 {toon_columns(Comment)}。"
             "id 可传给 get_comment_replies 钻取楼中楼；content 为空时可能是纯表情或图片，"
             "不代表这条评论没有内容。"
         )
@@ -73,6 +74,13 @@ class ReplyThreadItem(BaseModel):
     replies: str = Field(description=f"{_TOON_NOTE} 列与 get_comments 的 comments 相同。")
     has_more: bool = Field(description="这个楼是否还有更多回复")
     next_cursor: str | None = Field(default=None, description="这个楼的续取令牌")
+    withheld: int = Field(
+        default=0,
+        description=(
+            "这个楼里平台不肯给出的回复条数，翻到底也取不到。它们仍可能被返回的回复"
+            "用 parent_id 指到，那样的 parent_id 在结果里找不到对应行。"
+        ),
+    )
 
 
 class CommentRepliesResult(BaseModel):
@@ -91,7 +99,7 @@ class DanmakuResult(BaseModel):
     count: int = Field(description="本次返回的弹幕条数")
     danmaku: str = Field(
         description=(
-            f"{_TOON_NOTE} 列为 content,timestamp,heat。timestamp 是视频内秒数，"
+            f"{_TOON_NOTE} 列为 {toon_columns(Danmaku)}。timestamp 是视频内秒数，"
             "heat 是热度档位（约 1-10），数值越高越热门，同档内不再细分。"
         )
     )
@@ -110,7 +118,7 @@ class SubtitlesResult(BaseModel):
     )
     subtitles: str = Field(
         description=(
-            f"{_TOON_NOTE} 列为 start,end,content，起止为视频内秒数，保留一位小数。"
+            f"{_TOON_NOTE} 列为 {toon_columns(SubtitleEntry)}，起止为视频内秒数，保留一位小数。"
         )
     )
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
@@ -121,7 +129,7 @@ class PartsResult(BaseModel):
     count: int = Field(description="分段总数")
     parts: str = Field(
         description=(
-            f"{_TOON_NOTE} 列为 page,part,duration。page 是分段序号，可传给内容类工具的 "
+            f"{_TOON_NOTE} 列为 {toon_columns(VideoPart)}。page 是分段序号，可传给内容类工具的 "
             "page 参数；duration 为该段时长秒数。"
         )
     )
@@ -132,8 +140,8 @@ class SearchResult(BaseModel):
     count: int = Field(description="本批返回的条目数")
     results: str = Field(
         description=(
-            f"{_TOON_NOTE} 列为 title,url,author,published_at,duration,view_count,danmaku_count。"
-            "url 可直接传给内容类工具。"
+            f"{_TOON_NOTE} 列为 {toon_columns(SearchItem)}。"
+            "url 可直接传给内容类工具；duration_sec 为时长秒数。"
         )
     )
     has_more: bool = Field(description="true 表示还有更多结果")
@@ -145,8 +153,9 @@ class FeedResult(BaseModel):
     count: int = Field(description="本批返回的视频条数")
     feed: str = Field(
         description=(
-            f"{_TOON_NOTE} 列为 title,url,author,published_at,duration,view_count,rcmd_reason。"
-            "url 可直接传给内容类工具；rcmd_reason 是平台给的推荐理由，多数条目没有。"
+            f"{_TOON_NOTE} 列为 {toon_columns(FeedItem)}。"
+            "url 可直接传给内容类工具；duration_sec 为时长秒数；"
+            "rcmd_reason 是平台给的推荐理由，多数条目没有。"
         )
     )
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
@@ -237,6 +246,8 @@ _SERVER_INSTRUCTIONS = (
     "=false 表示已到底；游标不透明，不要自造或解析。"
     "列表类数据以 TOON 表格串返回，表头固定，同一工具每次返回的列相同。"
     "日历时间按运行本机的时区呈现。内容类工具与搜索的返回附 elapsed_s，为服务端处理秒数。"
+    "Bilibili video tools: video info, parts, comments and replies, danmaku (bullet comments), "
+    "subtitles, video frames, search, homepage recommendation feed, login."
 )
 
 _STATUS_MSG = {
@@ -287,7 +298,7 @@ def create_server(
         url: Annotated[str, Field(description=_URL_DESC)],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> VideoInfoResult:
-        """获取视频的标题、作者、发布时间、简介与各项统计。"""
+        """获取视频的标题、作者、发布时间、简介与各项统计。(video info, metadata, stats)"""
         video_id, part = _resolve(url, page)
         info = _client().get_video_info(video_id, part)
         return VideoInfoResult(**info.model_dump())
@@ -320,7 +331,7 @@ def create_server(
             ),
         ] = "hot",
     ) -> CommentsResult:
-        """获取视频的主评论，不含楼中楼。需要登录。"""
+        """获取视频的主评论，不含楼中楼。需要登录。(video comments)"""
         video_id, _ = _resolve(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
         return CommentsResult(
@@ -350,7 +361,7 @@ def create_server(
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentRepliesResult:
-        """按主评论 id 钻取楼中楼。需要登录。"""
+        """按主评论 id 钻取楼中楼。需要登录。(comment replies, sub-replies, thread)"""
         video_id, _ = _resolve(url)
         threads = _client().get_comment_replies(
             video_id, comment_ids=comment_ids, limit=limit, cursor=cursor
@@ -363,6 +374,7 @@ def create_server(
                     replies=to_toon("replies", t.page.items, Comment),
                     has_more=t.page.has_more,
                     next_cursor=t.page.next_cursor,
+                    withheld=t.withheld,
                 )
                 for t in threads
             ],
@@ -384,7 +396,7 @@ def create_server(
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> DanmakuResult:
-        """获取视频弹幕，按热度取一批，仍按时间轴排序。"""
+        """获取视频弹幕，按热度取一批，仍按时间轴排序。(danmaku, bullet comments)"""
         video_id, part = _resolve(url, page)
         bullets = _client().get_danmaku(video_id, count=count, page=part)
         return DanmakuResult(
@@ -409,7 +421,10 @@ def create_server(
             ),
         ] = None,
     ) -> SubtitlesResult:
-        """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。需要登录。"""
+        """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。需要登录。
+
+        (subtitles, captions, transcript)
+        """
         video_id, part = _resolve(url, page)
         track = _client().get_subtitles(video_id, part, lang)
         return SubtitlesResult(
@@ -425,7 +440,7 @@ def create_server(
     def get_parts(
         url: Annotated[str, Field(description=_URL_DESC)],
     ) -> PartsResult:
-        """列出多段视频（分 P）的全部分段。单段视频返回一项。"""
+        """列出多段视频（分 P）的全部分段。单段视频返回一项。(video parts, pages)"""
         video_id, _ = _resolve(url)
         parts = _client().get_parts(video_id)
         return PartsResult(
@@ -445,7 +460,7 @@ def create_server(
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> list[ImageContent | TextContent]:
-        """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录。"""
+        """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录。(video frame, screenshot)"""
         video_id, part = _resolve(url, page)
         jpeg = _client().get_frame(video_id, timestamp=timestamp, page=part)
         meta = {"video_id": video_id, "page": part}
@@ -476,6 +491,8 @@ def create_server(
 
         没有 BV 号或链接时用它入手：返回的每条都带链接，可直接传给内容类工具取评论、
         字幕、弹幕等。
+
+        (search videos, find video by keyword)
         """
         page = _client().search(query=query, count=count, cursor=cursor)
         return SearchResult(
@@ -501,13 +518,15 @@ def create_server(
 
         登录后按账号口味推，未登录给通用推荐。每次调用都是新的一批，想多刷就多调几次；
         这个流没有尽头也没有位置，既不能重放也不保证跨次调用不重复，要去重就按 url 自己去。
+
+        (homepage feed, recommendations, browse)
         """
         items = _client().get_feed(count=count)
         return FeedResult(count=len(items), feed=to_toon("feed", items, FeedItem))
 
     @mcp.tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:
-        """查询当前是否已登录（联网核验本地凭据是否仍然有效）。"""
+        """查询当前是否已登录（联网核验本地凭据是否仍然有效）。(login status)"""
         return LoginStateResult(is_login=_client().get_login_status())
 
     @mcp.tool(annotations=_LOCAL_ONLY)
@@ -517,7 +536,7 @@ def create_server(
             Field(description="从浏览器复制的整段 Cookie，单行。这是敏感凭据，会出现在对话中。"),
         ],
     ) -> CookieSavedResult:
-        """写入 B站登录 Cookie，即时生效。"""
+        """写入 B站登录 Cookie，即时生效。(set cookie, log in)"""
         value = cookie.strip()
         if not value:
             raise BilibiliError("cookie 不能为空；清除登录用 logout")
@@ -526,7 +545,7 @@ def create_server(
 
     @mcp.tool(annotations=_LOCAL_ONLY)
     def logout() -> LogoutResult:
-        """退出登录，删除本地保存的 Cookie。"""
+        """退出登录，删除本地保存的 Cookie。(log out, sign out)"""
         deleted = delete_cookie()
         return LogoutResult(
             deleted=deleted,
@@ -536,7 +555,7 @@ def create_server(
     # structured_output=False 同 get_frame：二维码内联返回，不进结构化通道。
     @mcp.tool(structured_output=False, annotations=_READS_PLATFORM)
     def start_qr_login() -> list[ImageContent | TextContent]:
-        """发起扫码登录，返回内联二维码图片。只发码，立即返回，不轮询。"""
+        """发起扫码登录，返回内联二维码图片。只发码，立即返回，不轮询。(QR code login)"""
         session = BilibiliClient().start_qr_login()
         meta = {
             "key": session.key,
@@ -552,7 +571,7 @@ def create_server(
     def check_qr_login(
         key: Annotated[str, Field(description="start_qr_login 返回的 key。")],
     ) -> QrCheckResult:
-        """查询扫码结果。每次只查一次，成功时凭据自动写盘。"""
+        """查询扫码结果。每次只查一次，成功时凭据自动写盘。(QR code login status)"""
         result = BilibiliClient().check_qr_login(key)
         if result.status is QrStatus.SUCCESS:
             path = save_cookie(result.cookie)

@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from polylens_bilibili.api._comments import fetch_comments, fetch_replies
-from polylens_bilibili.api._constants import MAIN_PAGE_SIZE
 from polylens_bilibili.api._danmaku import fetch_danmaku
 from polylens_bilibili.api._http import BilibiliHttpError, HttpClient, _RateLimited
 from polylens_bilibili.api._signing import NavInfo
@@ -19,6 +18,8 @@ from polylens_bilibili.api._subtitles import fetch_subtitles
 from polylens_bilibili.errors import AuthRequiredError, BilibiliError, RateLimitedError
 
 # ── 共用辅助 ────────────────────────────────────────────────────────────────
+
+_PLATFORM_PAGE = 20  # 平台的主评论单页条数，测试里用来拼"满页"
 
 _LOGGED_IN = NavInfo("imgkey", "subkey", True)
 _ANONYMOUS = NavInfo("imgkey", "subkey", False)
@@ -76,9 +77,9 @@ def test_fetch_comments_empty_replies_returns_empty():
 
 
 def _full_page(seq: int, *, is_end: bool = False) -> dict:
-    """一整页主评论（平台固定 20 条）。不足 20 条会被判为末页。"""
+    """一整页主评论（平台单页 20 条）。"""
     return _page(
-        [_reply(seq * 100 + i, f"r{seq}-{i}") for i in range(MAIN_PAGE_SIZE)],
+        [_reply(seq * 100 + i, f"r{seq}-{i}") for i in range(_PLATFORM_PAGE)],
         is_end=is_end, next_offset=f"offset{seq}",
     )
 
@@ -101,21 +102,53 @@ def test_fetch_comments_count_truncates_with_next_cursor():
     assert page.has_more is True and page.next_cursor == "offset2"
 
 
-def test_fetch_comments_short_page_ends_pagination():
-    """末页平台仍可能说没到底并给游标，照搬会让调用方多发一次必然为空的请求。
+def test_fetch_comments_short_page_is_not_the_end():
+    """不满一页不等于到底：置顶评论占掉首页一个名额，平台只给 19 条常规评论。
 
-    实测某视频共 15 条主评论，首页给 14 条（另 1 条在 top_replies）却 is_end=false。
+    按"不满 20 即到底"推断会在第一页就停下并报已抓全，把上千条评论截成 20 条。
     """
+    pages = [
+        _page(
+            [_reply(i + 1, f"r{i}") for i in range(19)],
+            is_end=False, next_offset="offset1", top_replies=[_reply(999, "top")],
+        ),
+        _page([_reply(100 + i, f"s{i}") for i in range(20)], is_end=False, next_offset="offset2"),
+    ]
     client = MagicMock()
-    client.get_json.return_value = _page(
-        [_reply(i + 1, f"r{i}") for i in range(14)],
-        is_end=False, next_offset="offset-that-leads-nowhere",
-        top_replies=[_reply(999, "top")],
-    )
+    client.get_json.side_effect = lambda endpoint, params: pages[client.get_json.call_count - 1]
     with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
-        page = fetch_comments(client, aid=100, count=50)
-    assert len(page.items) == 15  # 置顶 1 条 + 正文 14 条
-    assert client.get_json.call_count == 1  # 不再多探一页
+        page = fetch_comments(client, aid=100, count=35)
+    assert client.get_json.call_count == 2  # 首页的 19 条没被当成末页
+    assert len(page.items) == 40  # 置顶 1 + 首页 19 + 次页 20
+    assert page.has_more is True and page.next_cursor == "offset2"
+
+
+def test_fetch_comments_cursor_never_points_at_a_consumed_page():
+    """游标必须指向还没取回的那页。
+
+    先推进游标再抓下一页的写法，会在下一页触发终止时把游标留在已经取回的那页上，
+    调用方续取时重复拿到同一批。
+    """
+    pages = [
+        _full_page(1),  # 满页、非到底，给出 offset1
+        _page([_reply(999, "last")], is_end=True, next_offset="offset2"),  # offset1 这页
+    ]
+    client = MagicMock()
+    client.get_json.side_effect = lambda endpoint, params: pages[client.get_json.call_count - 1]
+    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+        page = fetch_comments(client, aid=100, count=25)
+    assert [c.content for c in page.items][-1] == "last"  # 第二页已经收进结果
+    assert page.has_more is False and page.next_cursor is None
+
+
+def test_fetch_comments_empty_page_after_a_full_one_ends_cleanly():
+    """热度序的末页谎报 is_end=false 并给游标，下一页才空；空页即到底，不留游标。"""
+    pages = [_full_page(1), _page([], is_end=False, next_offset="offset2")]
+    client = MagicMock()
+    client.get_json.side_effect = lambda endpoint, params: pages[client.get_json.call_count - 1]
+    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+        page = fetch_comments(client, aid=100, count=25)
+    assert len(page.items) == 20
     assert page.has_more is False and page.next_cursor is None
 
 
@@ -261,6 +294,40 @@ def test_fetch_replies_batch_continuation_lockstep():
         assert ids1 and ids2 and ids1.isdisjoint(ids2)
     assert by_id2["1"].page.has_more is False  # 8 条的楼这一窗到底
     assert by_id2["2"].page.has_more and by_id2["2"].page.next_cursor == "10"
+
+
+def test_fetch_replies_reports_withheld_count():
+    """平台声称的回复数多于它肯列出的条数，差额单独报出来。
+
+    差掉的那些被删除或折叠，翻到底也取不到，却仍会被其他回复用 parent_id 指到。
+    """
+    client = MagicMock()
+    client.get_json.return_value = {
+        "replies": [_reply(1, "r")],
+        "root": {"count": 11},
+        "page": {"num": 1, "size": 20, "count": 10},
+    }
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        out = fetch_replies(client, 100, ["555"], limit=5)
+    assert out[0].withheld == 1
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        {},                                              # 两个计数都没有
+        {"root": {"count": 5}},                          # 只有声称数
+        {"page": {"count": 5}},                          # 只有可列出数
+        {"root": {"count": 3}, "page": {"count": 9}},    # 声称的反而更少
+        {"root": {"count": "3"}, "page": {"count": 9}},  # 类型不对
+    ],
+)
+def test_fetch_replies_withheld_degrades_to_zero(shape: dict):
+    client = MagicMock()
+    client.get_json.return_value = {"replies": [_reply(1, "r")], **shape}
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        out = fetch_replies(client, 100, ["555"], limit=5)
+    assert out[0].withheld == 0
 
 
 def test_fetch_replies_requires_login():

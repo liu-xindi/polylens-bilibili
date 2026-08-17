@@ -107,7 +107,6 @@ def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, in
         cover_url=view.get("pic"),
         part_count=view.get("videos"),
         category_id=view.get("tid"),
-        category_name=view.get("tname"),
     )
     if is_multi:
         info.current_page = selected.get("page") or page

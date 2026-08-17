@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from polylens_bilibili.api import _feed as feed_mod
-from polylens_bilibili.api._feed import _duration_text, _to_feed_item, fetch_feed
+from polylens_bilibili.api._feed import _duration_seconds, _to_feed_item, fetch_feed
 from polylens_bilibili.api._signing import NavInfo
 from polylens_bilibili.errors import BilibiliError
 
@@ -55,7 +55,7 @@ def test_maps_fields() -> None:
     assert item.title == "标题"
     assert item.url == "https://www.bilibili.com/video/BV1xx"
     assert item.author == "up主"
-    assert item.duration == "3:45"
+    assert item.duration_sec == 225.0
     assert item.view_count == 1234
     assert item.published_at == "2023-11-15 06:13"
 
@@ -68,17 +68,14 @@ def test_takes_rcmd_reason_only_when_it_has_text() -> None:
     assert with_text is not None and with_text.rcmd_reason == "1万点赞"
 
 
-@pytest.mark.parametrize(
-    ("seconds", "text"),
-    [(0, "0:00"), (45, "0:45"), (225, "3:45"), (3600, "1:00:00"), (3723, "1:02:03")],
-)
-def test_duration_text(seconds: int, text: str) -> None:
-    assert _duration_text(seconds) == text
+@pytest.mark.parametrize("seconds", [0, 45, 225, 3723])
+def test_duration_seconds_passes_platform_value_through(seconds: int) -> None:
+    assert _duration_seconds(seconds) == float(seconds)
 
 
 @pytest.mark.parametrize("junk", [None, "abc", -5, ["x"]])
-def test_duration_text_degrades_to_none(junk: Any) -> None:
-    assert _duration_text(junk) is None
+def test_duration_seconds_degrades_to_none(junk: Any) -> None:
+    assert _duration_seconds(junk) is None
 
 
 # ── 只收视频条目 ────────────────────────────────────────────────────────────

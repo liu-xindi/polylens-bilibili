@@ -30,8 +30,29 @@ def test_to_search_item_maps_fields() -> None:
     assert item.author == "up主"
     assert item.view_count == 12345
     assert item.danmaku_count == 67
-    assert item.duration == "10:00"
+    assert item.duration_sec == 600.0
     assert item.published_at is not None  # pubdate 转本机时区可读串
+
+
+@pytest.mark.parametrize(
+    ("text", "seconds"),
+    [
+        ("10:00", 600.0),      # 常见形态
+        ("23:3", 1383.0),      # 秒不补零，平台原样如此
+        ("5505:10", 330310.0), # 长视频作"总分钟:秒"，没有小时段
+        ("45", 45.0),          # 只有秒
+        ("1:02:03", 3723.0),   # 平台哪天补上小时段也解得对
+        ("0:00", 0.0),
+    ],
+)
+def test_duration_seconds_parses_platform_text(text: str, seconds: float) -> None:
+    assert search_mod._duration_seconds(text) == seconds
+
+
+@pytest.mark.parametrize("junk", [None, 600, "", "abc", "1:2:3:4", "1:-2", "1:x"])
+def test_duration_seconds_degrades_to_none(junk: Any) -> None:
+    """解析不了只让这一格缺失，不带崩整条。"""
+    assert search_mod._duration_seconds(junk) is None
 
 
 # ── 分页（游标为绝对偏移量 / has_more 边界）─────────────────────────────────

@@ -11,7 +11,7 @@ from typing import Any
 
 from ..errors import AuthRequiredError, BilibiliError, RateLimitedError
 from ..models import Comment, Page, ReplyThread, to_local_time
-from ._constants import ENDPOINTS, MAIN_PAGE_SIZE, REPLY_PAGE_SIZE
+from ._constants import ENDPOINTS, REPLY_PAGE_SIZE
 from ._http import HttpClient, _RateLimited
 from ._signing import fetch_nav, sign_params
 
@@ -74,20 +74,35 @@ def _normalize_reply(reply: dict[str, Any], *, root_id: int | None = None) -> Co
     )
 
 
+def _withheld_count(data: dict[str, Any]) -> int:
+    """平台声称的回复数减去它肯列出的条数。
+
+    两者常有差额（实测 46 对 40、11 对 10），差掉的那些被删除或折叠，任何页码都取不到，
+    而它们仍会作为 parent_id 被其他回复引用。差额是发现引用断链的唯一线索。
+    """
+    declared = (data.get("root") or {}).get("count")
+    listable = (data.get("page") or {}).get("count")
+    if not isinstance(declared, int) or not isinstance(listable, int):
+        return 0
+    return max(0, declared - listable)
+
+
 def _fetch_thread(
     client: HttpClient, aid: int, root_id: int, start: int, count: int
-) -> Page[Comment]:
+) -> tuple[Page[Comment], int]:
     """取某主评论楼中楼的 [start, start+count) 窗口（pn 可跳页，从 start 所在页起）。"""
     pn = start // REPLY_PAGE_SIZE + 1
     skip = start % REPLY_PAGE_SIZE  # 起始页内偏移
     collected: list[dict[str, Any]] = []
     reached_end = False
+    withheld = 0
     while len(collected) < skip + count:
         data = client.get_json(
             ENDPOINTS["replies_sub"],
             {"oid": aid, "type": 1, "root": root_id, "ps": REPLY_PAGE_SIZE, "pn": pn},
-        )
-        page = (data or {}).get("replies") or []
+        ) or {}
+        page = data.get("replies") or []
+        withheld = _withheld_count(data)
         collected.extend(page)
         if len(page) < REPLY_PAGE_SIZE:
             reached_end = True
@@ -98,7 +113,7 @@ def _fetch_thread(
     replies = [_normalize_reply(raw, root_id=root_id) for raw in window]
     has_more = (skip + len(window) < len(collected)) or not reached_end
     next_cursor = str(start + len(window)) if has_more else None
-    return Page(items=replies, has_more=has_more, next_cursor=next_cursor)
+    return Page(items=replies, has_more=has_more, next_cursor=next_cursor), withheld
 
 
 def fetch_replies(
@@ -123,8 +138,8 @@ def fetch_replies(
     results: list[ReplyThread] = []
     try:
         for cid in comment_ids:
-            page = _fetch_thread(client, aid, int(cid), start, count)
-            results.append(ReplyThread(comment_id=cid, page=page))
+            page, withheld = _fetch_thread(client, aid, int(cid), start, count)
+            results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
             time.sleep(_AFTER_THREAD_DELAY)
     except _RateLimited:
         raise RateLimitedError("楼中楼抓取触发风控，稍后重试。") from None
@@ -164,6 +179,10 @@ def fetch_comments(
 
     两种排序的游标性质不同：热度序的游标里只装了 session_id，位置由平台按会话维护，
     同一游标重复取会往前走；时间序的游标带位置，可重放。
+
+    到底只认平台给的信号：标了 is_end、返回空页、或没有下一页游标。不按"这页不满 20 条"
+    推断，那是错的：第一页有置顶评论时平台只给 19 条常规评论，中途页也出现过 19 条。
+    代价是热度序的末页会谎报 is_end=false 并给出游标，要多发一次必然为空的请求才停。
     """
     if count < 1:
         raise BilibiliError(f"count 需为正整数，收到 {count}")
@@ -175,38 +194,33 @@ def fetch_comments(
         raise AuthRequiredError("comments")
     want = count
     comments: list[Comment] = []
-    offset = cursor or ""
-    has_more = False
-    next_cursor: str | None = None
+    # offset 恒指向"还没取回的那一页"，None 表示没有下一页。抓完一页立刻改写它，
+    # 故循环无论从哪个出口结束，它都可以直接当对外游标用。
+    # 若改成先推进再抓，游标会停在已经取回的那页上，调用方续取时重复拿到同一批。
+    offset: str | None = cursor or ""
     first_page = not cursor  # 置顶评论只在从头的第一页出现
 
     try:
-        while len(comments) < want:
+        while offset is not None and len(comments) < want:
             data = _fetch_main_page(client, aid, nav.img_key, nav.sub_key, offset, mode)
             replies = data.get("replies") or []
             if not replies:
-                break  # 空页 → 已抓全
+                offset = None
+                break
             if first_page:
                 first_page = False
                 for raw in data.get("top_replies") or []:
                     comments.append(_normalize_reply(raw))
             for raw in replies:
                 comments.append(_normalize_reply(raw))
-            if len(replies) < MAIN_PAGE_SIZE:
-                # 热度序的末页会给出 is_end=false 与 next_offset，下一页才空；照搬会让调用方
-                # 多发一次必然为空的请求。时间序的 is_end 是准的，这里只是提前一步得到同样结论。
-                # 两种排序下不满页都只出现在最后一页，所以按此判定不会漏抓。
-                break
             cur = data.get("cursor") or {}
             if cur.get("is_end"):
-                break  # 平台标记到底 → 抓全
-            offset = (cur.get("pagination_reply") or {}).get("next_offset", "")
-            if not offset:
-                break  # 无下一页游标 → 抓全
-            has_more = True  # 平台还有更多
-            next_cursor = offset
-            time.sleep(_MAIN_PAGE_DELAY)
+                offset = None
+                break
+            offset = (cur.get("pagination_reply") or {}).get("next_offset") or None
+            if offset is not None and len(comments) < want:
+                time.sleep(_MAIN_PAGE_DELAY)
     except _RateLimited:
         raise RateLimitedError("触发风控，稍后重试。") from None
 
-    return Page(items=comments, has_more=has_more, next_cursor=next_cursor)
+    return Page(items=comments, has_more=offset is not None, next_cursor=offset)

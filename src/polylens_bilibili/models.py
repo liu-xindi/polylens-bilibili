@@ -74,6 +74,15 @@ def toon_table(name: str, rows: list[dict[str, Any]], columns: list[str]) -> str
     return "\n".join([header, *lines]) if lines else header
 
 
+def toon_columns(item_type: type) -> str:
+    """数据类的列名串。
+
+    供 outputSchema 的字段说明引用，与 to_toon 生成的表头取自同一处：
+    两边各写一份时，给数据类加字段会让说明悄悄过时。
+    """
+    return ",".join(f.name for f in fields(item_type))
+
+
 def to_toon(name: str, items: list[Any], item_type: type) -> str:
     """把数据类实例列表编码为 TOON 表格串。
 
@@ -142,6 +151,7 @@ class ReplyThread:
 
     comment_id: str
     page: Page[Comment]
+    withheld: int = 0  # 平台声称有、却不肯列出的回复条数（见 _comments._withheld_count）
 
 
 @dataclass(slots=True)
@@ -152,7 +162,7 @@ class SearchItem:
     url: str
     author: str | None
     published_at: str | None  # 本机时区可读时间
-    duration: str | None  # 时长文本，平台原样（如 "233:33"）
+    duration_sec: float | None  # 时长秒数（平台给的是"总分钟:秒"文本，已换算）
     view_count: int | None
     danmaku_count: int | None
 
@@ -165,7 +175,7 @@ class FeedItem:
     url: str
     author: str | None
     published_at: str | None  # 本机时区可读时间
-    duration: str | None  # 时长文本，如 3:45
+    duration_sec: float | None  # 时长秒数
     view_count: int | None
     rcmd_reason: str | None  # 平台给的推荐理由，多数条目没有
 
@@ -230,7 +240,6 @@ class VideoInfo(BaseModel):
     cover_url: str | None = Field(default=None, description="封面图地址")
     part_count: int | None = Field(default=None, description="分段总数，单段视频为 1")
     category_id: int | None = Field(default=None, description="分区 id")
-    category_name: str | None = Field(default=None, description="分区名")
     current_page: int | None = Field(
         default=None, description="当前是第几段，仅多段视频有值"
     )

@@ -17,14 +17,10 @@ from ._search import _epoch_s_to_local, _int_or_none
 from ._signing import fetch_nav, sign_params
 
 
-def _duration_text(seconds: Any) -> str | None:
-    """秒数 → 与搜索结果同形的时长文本（如 3:45、1:02:03）。"""
-    total = _int_or_none(seconds)
-    if total is None or total < 0:
-        return None
-    hours, rest = divmod(total, 3600)
-    minutes, secs = divmod(rest, 60)
-    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+def _duration_seconds(value: Any) -> float | None:
+    """推荐流的 duration 已经是秒数；负数与非数字当此项没有。"""
+    total = _int_or_none(value)
+    return float(total) if total is not None and total >= 0 else None
 
 
 def _to_feed_item(raw: Any) -> FeedItem | None:
@@ -44,7 +40,7 @@ def _to_feed_item(raw: Any) -> FeedItem | None:
         url=f"https://www.bilibili.com/video/{bvid}",
         author=(raw.get("owner") or {}).get("name") or None,
         published_at=_epoch_s_to_local(raw.get("pubdate")),
-        duration=_duration_text(raw.get("duration")),
+        duration_sec=_duration_seconds(raw.get("duration")),
         view_count=_int_or_none(stat.get("view")),
         rcmd_reason=(raw.get("rcmd_reason") or {}).get("content") or None,
     )

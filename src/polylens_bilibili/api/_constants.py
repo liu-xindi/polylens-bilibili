@@ -30,9 +30,6 @@ SEARCH_RESULT_CAP = 1000
 # 楼中楼单页条数，平台封顶 20。
 REPLY_PAGE_SIZE = 20
 
-# 主评论单页条数，平台固定 20（不由请求参数控制）。
-MAIN_PAGE_SIZE = 20
-
 # 截帧画质：720p。
 FRAME_QUALITY_ID = 64
 

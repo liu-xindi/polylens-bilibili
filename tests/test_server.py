@@ -27,6 +27,7 @@ from polylens_bilibili.models import (
     SubtitleEntry,
     VideoInfo,
     VideoPart,
+    toon_columns,
 )
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
@@ -178,6 +179,26 @@ def test_get_comments_omits_next_cursor_at_end() -> None:
     assert payload["comments"].startswith("comments[0]{")
 
 
+_TOON_FIELDS = [
+    (server_mod.CommentsResult, "comments", Comment),
+    (server_mod.DanmakuResult, "danmaku", Danmaku),
+    (server_mod.SubtitlesResult, "subtitles", SubtitleEntry),
+    (server_mod.PartsResult, "parts", VideoPart),
+    (server_mod.SearchResult, "results", SearchItem),
+    (server_mod.FeedResult, "feed", FeedItem),
+]
+
+
+@pytest.mark.parametrize(("model", "field", "item_type"), _TOON_FIELDS)
+def test_declared_columns_match_the_actual_header(model, field, item_type) -> None:
+    """字段说明里的列必须与 TOON 表头逐字一致。
+
+    两边曾各写一份，给数据类加字段后说明少了四列，模型据此读表就会错位。
+    """
+    described = model.model_fields[field].description
+    assert f"列为 {toon_columns(item_type)}" in described
+
+
 def test_get_comment_replies_groups_by_thread() -> None:
     threads = [
         ReplyThread("1", Page(items=[_comment("11", "x")], has_more=True, next_cursor="5")),
@@ -192,6 +213,19 @@ def test_get_comment_replies_groups_by_thread() -> None:
     assert results[0]["has_more"] is True and results[0]["next_cursor"] == "5"
     assert results[1]["has_more"] is False
     assert results[0]["replies"].startswith("replies[1]{")
+
+
+def test_get_comment_replies_surfaces_withheld() -> None:
+    """平台扣下的回复条数逐楼给出，让调用方知道引用链可能断在哪。"""
+    threads = [
+        ReplyThread("1", Page(items=[_comment("11", "x")], has_more=False), withheld=6),
+        ReplyThread("2", Page(items=[], has_more=False)),
+    ]
+    with _with_client(get_comment_replies=threads):
+        payload = _payload(
+            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "limit": 5}
+        )
+    assert [r["withheld"] for r in payload["results"]] == [6, 0]
 
 
 def test_get_danmaku_returns_toon() -> None:
@@ -240,7 +274,7 @@ def test_search_returns_toon_and_paging() -> None:
     page = Page(
         items=[
             SearchItem(title="t1", url="u1", author=None, published_at=None,
-                       duration=None, view_count=9, danmaku_count=None)
+                       duration_sec=None, view_count=9, danmaku_count=None)
         ],
         has_more=True,
         next_cursor="1",
@@ -250,7 +284,7 @@ def test_search_returns_toon_and_paging() -> None:
     assert payload["count"] == 1
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
     assert payload["results"].startswith(
-        "results[1]{title,url,author,published_at,duration,view_count,danmaku_count}:"
+        "results[1]{title,url,author,published_at,duration_sec,view_count,danmaku_count}:"
     )
 
 
@@ -463,15 +497,15 @@ def test_get_frame_description_omits_deployment_detail() -> None:
 def test_get_feed_returns_toon() -> None:
     items = [
         FeedItem(title="t1", url="u1", author="甲", published_at="2026-08-17 10:00",
-                 duration="3:45", view_count=1234, rcmd_reason="1万点赞"),
+                 duration_sec=225.0, view_count=1234, rcmd_reason="1万点赞"),
         FeedItem(title="t2", url="u2", author=None, published_at=None,
-                 duration=None, view_count=None, rcmd_reason=None),
+                 duration_sec=None, view_count=None, rcmd_reason=None),
     ]
     with _with_client(get_feed=items):
         payload = _payload("get_feed", {"count": 2})
     assert payload["count"] == 2
     assert payload["feed"].startswith(
-        "feed[2]{title,url,author,published_at,duration,view_count,rcmd_reason}:"
+        "feed[2]{title,url,author,published_at,duration_sec,view_count,rcmd_reason}:"
     )
     assert "1万点赞" in payload["feed"]
     assert payload["elapsed_s"] >= 0

@@ -58,6 +58,29 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _duration_seconds(text: Any) -> float | None:
+    """平台的时长文本 → 秒数；解析不了就当此项没有。
+
+    冒号分段从右往左依次是秒、分、时。平台实测只给"总分钟:秒"（长视频作 "5505:10"，
+    没有小时段），按位取仍兼容它哪天补上小时段。
+    """
+    if not isinstance(text, str):
+        return None
+    chunks = text.strip().split(":")
+    if not 1 <= len(chunks) <= 3:
+        return None
+    total = 0
+    for unit, chunk in zip((1, 60, 3600), reversed(chunks), strict=False):
+        try:
+            value = int(chunk)
+        except ValueError:
+            return None
+        if value < 0:
+            return None
+        total += unit * value
+    return float(total)
+
+
 def _epoch_s_to_local(value: Any) -> str | None:
     """epoch 秒 → 本机时区可读串；转不动或越界就当没有发布时间。
 
@@ -73,7 +96,7 @@ def _to_search_item(raw: Any) -> SearchItem | None:
     """单条映射。取不到 bvid 就跳过，免得一条坏数据毁掉整页。
 
     bvid 是唯一进链接的字段，类型不对会拼出看着能用实则无效的 URL，
-    比整条缺失更难察觉，故连类型一并判。标题/作者/时长类型不对只是那一格难看，
+    比整条缺失更难察觉，故连类型一并判。标题/作者类型不对只是那一格难看，
     不影响消费端据链接继续取内容，照原样透传。
     """
     if not isinstance(raw, dict):
@@ -86,7 +109,7 @@ def _to_search_item(raw: Any) -> SearchItem | None:
         url=f"https://www.bilibili.com/video/{bvid}",
         author=raw.get("author") or None,
         published_at=_epoch_s_to_local(raw.get("pubdate")),
-        duration=raw.get("duration") or None,
+        duration_sec=_duration_seconds(raw.get("duration")),
         view_count=_int_or_none(raw.get("play")),
         danmaku_count=_int_or_none(raw.get("danmaku")),
     )
