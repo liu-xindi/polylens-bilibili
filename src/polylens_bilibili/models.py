@@ -200,6 +200,10 @@ class VideoInfo(BaseModel):
     duration_sec: float | None = Field(
         default=None, description="时长秒数；多段视频为当前段的时长"
     )
+    total_duration_sec: float | None = Field(
+        default=None,
+        description="整片时长秒数，多段视频为全部分段之和；单段视频与 duration_sec 相同",
+    )
     view_count: int | None = Field(default=None, description="播放数")
     danmaku_count_total: int | None = Field(
         default=None,

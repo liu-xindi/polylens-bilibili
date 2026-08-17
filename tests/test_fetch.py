@@ -529,3 +529,44 @@ def test_fetch_subtitles_track_without_url_raises():
     with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
         with pytest.raises(BilibiliError, match="地址"):
             fetch_subtitles(client, aid=100, cid=200)
+
+
+# ── 评论排序方式 ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("sort", "platform_mode"), [("hot", 3), ("newest", 2)])
+def test_fetch_comments_maps_sort_to_platform_mode(sort: str, platform_mode: int):
+    """对外用语义名，平台的 mode 编码不外泄。"""
+    seen: dict[str, object] = {}
+
+    def _get_json(endpoint, params):
+        seen.update(params)
+        return _page([_reply(1, "r")], is_end=True)
+
+    client = MagicMock()
+    client.get_json.side_effect = _get_json
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(client, aid=100, count=5, sort=sort)
+    assert seen["mode"] == platform_mode
+
+
+def test_fetch_comments_defaults_to_hot():
+    seen: dict[str, object] = {}
+
+    def _get_json(endpoint, params):
+        seen.update(params)
+        return _page([_reply(1, "r")], is_end=True)
+
+    client = MagicMock()
+    client.get_json.side_effect = _get_json
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(client, aid=100, count=5)
+    assert seen["mode"] == 3
+
+
+def test_fetch_comments_rejects_unknown_sort():
+    client = MagicMock()
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        with pytest.raises(BilibiliError, match="排序"):
+            fetch_comments(client, aid=100, count=5, sort="oldest")
+    client.get_json.assert_not_called()

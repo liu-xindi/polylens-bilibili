@@ -131,14 +131,18 @@ def fetch_replies(
     return results
 
 
+#: 对外的排序名 → 平台的 mode 编码。平台在 cursor.support_mode 里声明支持这两种。
+_SORT_MODE = {"hot": 3, "newest": 2}
+
+
 def _fetch_main_page(
-    client: HttpClient, aid: int, img_key: str, sub_key: str, offset: str
+    client: HttpClient, aid: int, img_key: str, sub_key: str, offset: str, mode: int
 ) -> dict[str, Any]:
-    """取一页主评论（WBI 签名，热度序 mode=3）。翻页与终止判断交给 fetch_comments。"""
+    """取一页主评论（WBI 签名）。翻页与终止判断交给 fetch_comments。"""
     params: dict[str, Any] = {
         "oid": aid,
         "type": 1,
-        "mode": 3,  # 热度序（B站评论固定按热度取）
+        "mode": mode,
         "pagination_str": json.dumps({"offset": offset}, separators=(",", ":")),
         "plat": 1,
     }
@@ -152,13 +156,20 @@ def fetch_comments(
     *,
     count: int,
     cursor: str | None = None,
+    sort: str = "hot",
 ) -> Page[Comment]:
     """抓取视频主评论（纯主评论，不含楼中楼）。置顶评论插入列表最前面。
 
     cursor=None 从头；count 为想要条数的下限（实际可能略多，整页对齐以保 cursor 续取不丢）。
+
+    两种排序的游标性质不同：热度序的游标里只装了 session_id，位置由平台按会话维护，
+    同一游标重复取会往前走；时间序的游标带位置，可重放。
     """
     if count < 1:
         raise BilibiliError(f"count 需为正整数，收到 {count}")
+    if sort not in _SORT_MODE:
+        raise BilibiliError(f"未知的排序方式 {sort!r}，可选：{'、'.join(_SORT_MODE)}")
+    mode = _SORT_MODE[sort]
     nav = fetch_nav(client)
     if not nav.is_login:
         raise AuthRequiredError("comments")
@@ -171,7 +182,7 @@ def fetch_comments(
 
     try:
         while len(comments) < want:
-            data = _fetch_main_page(client, aid, nav.img_key, nav.sub_key, offset)
+            data = _fetch_main_page(client, aid, nav.img_key, nav.sub_key, offset, mode)
             replies = data.get("replies") or []
             if not replies:
                 break  # 空页 → 已抓全
@@ -182,9 +193,9 @@ def fetch_comments(
             for raw in replies:
                 comments.append(_normalize_reply(raw))
             if len(replies) < MAIN_PAGE_SIZE:
-                # 末页平台仍可能给出 is_end=false 与 next_offset：实测某视频共 15 条主评论，
-                # 首页给 14 条（另 1 条在 top_replies）却说没到底，下一页才空。照搬会让调用方
-                # 多发一次必然为空的请求。主评论每页固定 20 条，不满即到底。
+                # 热度序的末页会给出 is_end=false 与 next_offset，下一页才空；照搬会让调用方
+                # 多发一次必然为空的请求。时间序的 is_end 是准的，这里只是提前一步得到同样结论。
+                # 两种排序下不满页都只出现在最后一页，所以按此判定不会漏抓。
                 break
             cur = data.get("cursor") or {}
             if cur.get("is_end"):

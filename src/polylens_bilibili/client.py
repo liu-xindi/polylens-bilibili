@@ -39,19 +39,27 @@ _AV_RE = re.compile(r"\bav(\d+)\b", re.IGNORECASE)
 _PAGE_RE = re.compile(r"[?&]p=(\d+)")
 
 
-def _expand_short_link(url: str, timeout: int = 20) -> str:
-    """b23.tv 之类的短链展开成完整链接；不是短链则原样返回。"""
+def _expand_short_link(url: str, cookie: str = "", timeout: int = 20) -> str:
+    """b23.tv 之类的短链展开成完整链接；不是短链则原样返回。
+
+    带上 cookie：短链走的是网页域名，平台对部分出口 IP 的网页域名有风控，
+    同一台机器裸 UA 得 412、带登录 cookie 则正常跳转。匿名 cookie 不管用。
+    """
     if urlparse(url).netloc not in SHORT_LINK_HOSTS:
         return url
-    req = Request(url, headers={"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT}
+    if cookie.strip():
+        headers["Cookie"] = cookie.strip()
     try:
-        with urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urlopen(Request(url, headers=headers), timeout=timeout) as resp:  # noqa: S310
             return resp.geturl()
     except (HTTPError, URLError) as exc:
-        # 展开失败（含 412 风控、网络不可达等）：指向完整链接这条确定可行的路。
-        raise BilibiliError(
-            f"短链解析失败，无法展开 {url}；改用完整视频链接（含 BV 号）后重试。"
-        ) from exc
+        hint = (
+            "改用完整视频链接（含 BV 号）后重试。"
+            if cookie.strip()
+            else "本服务的出口地址可能被平台限制；登录后重试，或改用完整视频链接（含 BV 号）。"
+        )
+        raise BilibiliError(f"短链解析失败，无法展开 {url}；{hint}") from exc
 
 
 def _extract_video_id(text: str) -> str:
@@ -73,14 +81,15 @@ def _extract_page(text: str) -> int | None:
     return value if value >= 1 else None
 
 
-def resolve_video(url: str, page: int | None = None) -> tuple[str, int]:
+def resolve_video(url: str, page: int | None = None, cookie: str = "") -> tuple[str, int]:
     """把输入解析成 (视频号, 分段序号)。
 
     分段序号取值顺序：显式传入 > 链接里的 ?p=N > 第 1 段。
+    cookie 只在输入是短链时用得上，展开短链要它才能过风控。
     """
     if page is not None and page < 1:
         raise BilibiliError(f"page 需为正整数，收到 {page}")
-    expanded = _expand_short_link(url)
+    expanded = _expand_short_link(url, cookie)
     # 链接自带的 ?p=0 由 _extract_page 归入"没写"，不为它报错：这样的链接在网页上照样能打开。
     chosen = page if page is not None else _extract_page(expanded)
     return _extract_video_id(expanded), chosen or 1
@@ -117,10 +126,10 @@ class BilibiliClient:
         return info
 
     def get_comments(
-        self, video_id: str, *, count: int, cursor: str | None = None
+        self, video_id: str, *, count: int, cursor: str | None = None, sort: str = "hot"
     ) -> Page[Comment]:
         _info, aid, _cid = build_video_info(self._view(video_id))
-        return fetch_comments(self._http, aid, count=count, cursor=cursor)
+        return fetch_comments(self._http, aid, count=count, cursor=cursor, sort=sort)
 
     def get_comment_replies(
         self, video_id: str, *, comment_ids: list[str], limit: int, cursor: str | None = None

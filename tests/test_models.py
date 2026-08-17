@@ -176,7 +176,8 @@ def test_video_info_keeps_all_fields_including_none_and_zero() -> None:
     assert d["view_count"] == 0
     assert d["author"] is None
     assert set(d) == {"id", "title", "author", "url", "published_at", "summary",
-                      "duration_sec", "view_count", "danmaku_count_total", "comment_count",
+                      "duration_sec", "total_duration_sec", "view_count", "danmaku_count_total",
+                      "comment_count",
                       "like_count", "favorite_count", "share_count", "coin_count",
                       "cover_url", "part_count", "category_id", "category_name",
                       "current_page", "current_part"}

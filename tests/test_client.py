@@ -180,3 +180,70 @@ def test_get_frame_allows_timestamp_when_duration_unknown(
     monkeypatch.setattr(BilibiliClient, "_view", lambda self, vid: _view_stub(duration=None))
     monkeypatch.setattr(client_mod, "fetch_frame", lambda http, bvid, cid, at: b"jpeg")
     assert BilibiliClient().get_frame("BV1xx", timestamp=9999.0) == b"jpeg"
+
+
+# ── 短链展开 ────────────────────────────────────────────────────────────────
+
+
+class _Resp:
+    def __init__(self, url: str) -> None:
+        self._url = url
+
+    def geturl(self) -> str:
+        return self._url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a: Any) -> None:
+        return None
+
+
+def test_short_link_carries_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
+    """短链走网页域名，平台对部分出口地址有风控，带登录 cookie 才放行。"""
+    seen: dict[str, Any] = {}
+
+    def _fake(req, timeout=20):
+        seen["headers"] = dict(req.headers)
+        return _Resp(BV_URL)
+
+    monkeypatch.setattr(client_mod, "urlopen", _fake)
+    resolve_video("https://b23.tv/abcdef", cookie="SESSDATA=x")
+    assert seen["headers"].get("Cookie") == "SESSDATA=x"
+
+
+def test_short_link_without_cookie_sends_no_cookie_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def _fake(req, timeout=20):
+        seen["headers"] = dict(req.headers)
+        return _Resp(BV_URL)
+
+    monkeypatch.setattr(client_mod, "urlopen", _fake)
+    resolve_video("https://b23.tv/abcdef")
+    assert "Cookie" not in seen["headers"]
+
+
+def test_short_link_failure_hint_depends_on_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未登录时多给一条线索：这台机器的出口地址可能被限制。"""
+    from urllib.error import URLError
+
+    def _boom(req, timeout=20):
+        raise URLError("nope")
+
+    monkeypatch.setattr(client_mod, "urlopen", _boom)
+    with pytest.raises(BilibiliError, match="登录后重试"):
+        resolve_video("https://b23.tv/abcdef")
+    with pytest.raises(BilibiliError) as got:
+        resolve_video("https://b23.tv/abcdef", cookie="SESSDATA=x")
+    assert "登录后重试" not in str(got.value)
+
+
+def test_non_short_link_never_goes_online(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(req, timeout=20):
+        raise AssertionError("不该联网")
+
+    monkeypatch.setattr(client_mod, "urlopen", _boom)
+    assert resolve_video(BV_URL)[0] == "BV1xx411c7mD"

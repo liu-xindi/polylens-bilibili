@@ -12,7 +12,7 @@ import io
 import json
 import time
 from collections.abc import Callable
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import segno
 from mcp.server.fastmcp import FastMCP
@@ -78,8 +78,8 @@ class CommentRepliesResult(BaseModel):
     video_id: str = Field(description="解析出的视频号")
     results: list[ReplyThreadItem] = Field(
         description=(
-            "每个楼一项。翻页状态在每项里各一份，本工具没有顶层的 has_more；"
-            "同次调用里没到底的楼可以把 id 一并带上，用同一个 next_cursor 整批续翻。"
+            "每个楼一项，翻页状态在每项里各一份，本工具没有顶层的 has_more。"
+            "要继续翻，把还没到底的那些 comment_id 一并再传一次，cursor 用它们给出的 next_cursor。"
         )
     )
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
@@ -147,7 +147,6 @@ class LoginStateResult(BaseModel):
 
 
 class CookieSavedResult(BaseModel):
-    file: str = Field(description="凭据写入的文件路径")
     message: str = Field(description="结果说明")
 
 
@@ -168,6 +167,11 @@ class QrCheckResult(BaseModel):
 
 def _client() -> BilibiliClient:
     return BilibiliClient(load_cookie())
+
+
+def _resolve(url: str, page: int | None = None) -> tuple[str, int]:
+    """解析出视频号与分段序号。短链展开要带 cookie 才能过平台对网页域名的风控。"""
+    return resolve_video(url, page, cookie=load_cookie())
 
 
 def _timed(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -272,7 +276,7 @@ def create_server(
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> VideoInfoResult:
         """获取视频的标题、作者、发布时间、简介与各项统计。"""
-        video_id, part = resolve_video(url, page)
+        video_id, part = _resolve(url, page)
         info = _client().get_video_info(video_id, part)
         return VideoInfoResult(**info.model_dump())
 
@@ -284,16 +288,27 @@ def create_server(
             int,
             Field(
                 description=(
-                    "想要的主评论条数。按整页抓取，页内可能有条目被平台过滤，"
-                    "故实际返回可多可少。评论按热度序返回，置顶评论排在第一页最前。"
+                    "想要的主评论条数，实际返回可能多于或少于这个数。"
+                    "置顶评论排在第一页最前。"
                 )
             ),
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
+        mode: Annotated[
+            Literal["hot", "newest"],
+            Field(
+                description=(
+                    "排序方式：hot 按热度，newest 按时间倒序。"
+                    "两者的游标性质不同：hot 的游标绑在一次翻页过程上，中断后无法从原处接续，"
+                    "重复用同一个游标会继续往后走；newest 的游标是位置标识，可以重复取到同一批。"
+                    "要完整抓取或需要断点续取时用 newest。"
+                )
+            ),
+        ] = "hot",
     ) -> CommentsResult:
         """获取视频的主评论，不含楼中楼。需要登录。"""
-        video_id, _ = resolve_video(url)
-        page = _client().get_comments(video_id, count=count, cursor=cursor)
+        video_id, _ = _resolve(url)
+        page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
         return CommentsResult(
             video_id=video_id,
             count=len(page.items),
@@ -315,14 +330,14 @@ def create_server(
             Field(
                 description=(
                     "每个楼取多少条回复，超出的截断，用 cursor 续取。"
-                    "楼中楼串行抓取且平台单页 20 条，limit 与楼数一起决定请求次数与耗时。"
+                    "它与 comment_ids 的个数一起决定这次调用的耗时，两者都大时会明显变慢。"
                 )
             ),
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentRepliesResult:
         """按主评论 id 钻取楼中楼。需要登录。"""
-        video_id, _ = resolve_video(url)
+        video_id, _ = _resolve(url)
         threads = _client().get_comment_replies(
             video_id, comment_ids=comment_ids, limit=limit, cursor=cursor
         )
@@ -355,7 +370,7 @@ def create_server(
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> DanmakuResult:
         """获取视频弹幕，按热度取一批，仍按时间轴排序。"""
-        video_id, part = resolve_video(url, page)
+        video_id, part = _resolve(url, page)
         bullets = _client().get_danmaku(video_id, count=count, page=part)
         return DanmakuResult(
             video_id=video_id,
@@ -380,7 +395,7 @@ def create_server(
         ] = None,
     ) -> SubtitlesResult:
         """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。需要登录。"""
-        video_id, part = resolve_video(url, page)
+        video_id, part = _resolve(url, page)
         track = _client().get_subtitles(video_id, part, lang)
         return SubtitlesResult(
             video_id=video_id,
@@ -396,7 +411,7 @@ def create_server(
         url: Annotated[str, Field(description=_URL_DESC)],
     ) -> PartsResult:
         """列出多段视频（分 P）的全部分段。单段视频返回一项。"""
-        video_id, _ = resolve_video(url)
+        video_id, _ = _resolve(url)
         parts = _client().get_parts(video_id)
         return PartsResult(
             video_id=video_id,
@@ -415,8 +430,8 @@ def create_server(
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> list[ImageContent | TextContent]:
-        """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录，需本机安装 ffmpeg。"""
-        video_id, part = resolve_video(url, page)
+        """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录。"""
+        video_id, part = _resolve(url, page)
         jpeg = _client().get_frame(video_id, timestamp=timestamp, page=part)
         meta = {"video_id": video_id, "page": part}
         return [
@@ -471,11 +486,8 @@ def create_server(
         value = cookie.strip()
         if not value:
             raise BilibiliError("cookie 不能为空；清除登录用 logout")
-        path = save_cookie(value)
-        return CookieSavedResult(
-            file=str(path),
-            message=f"Cookie 已写入 {path}，即时生效；可调 get_login_status 确认。",
-        )
+        save_cookie(value)
+        return CookieSavedResult(message="Cookie 已保存，即时生效；可调 get_login_status 确认。")
 
     @mcp.tool(annotations=_LOCAL_ONLY)
     def logout() -> LogoutResult:

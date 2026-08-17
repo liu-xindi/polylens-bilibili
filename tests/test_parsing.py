@@ -438,3 +438,19 @@ def test_normalize_reply_keeps_only_real_links_when_mixed():
         },
     }))
     assert c.link_titles == "某个视频"
+
+
+# ── 整片时长 ────────────────────────────────────────────────────────────────
+
+
+def test_total_duration_is_whole_video_on_multi_part():
+    """顶层 duration 是整片时长；多段时 duration_sec 换成了当前段，总时长另立字段。"""
+    info, _, _ = build_video_info(_multi_view(duration=690), page=2)
+    assert info.duration_sec == 600  # 第 2 段
+    assert info.total_duration_sec == 690  # 整片
+
+
+def test_total_duration_equals_duration_on_single_part():
+    info, _, _ = build_video_info(_view(duration=42))
+    assert info.duration_sec == 42
+    assert info.total_duration_sec == 42

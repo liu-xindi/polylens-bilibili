@@ -309,7 +309,8 @@ def test_set_cookie_writes_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
         "polylens_bilibili.credentials.cookie_file_path", lambda: path
     )
     payload = _payload("set_cookie", {"cookie": "  SESSDATA=abc  "})
-    assert payload["file"] == str(path)
+    assert "生效" in payload["message"]
+    assert "file" not in payload  # 文件路径对模型无用，不下发
     assert path.read_text() == "SESSDATA=abc"  # 去掉首尾空白
 
 
@@ -401,3 +402,55 @@ def test_content_tools_attach_elapsed_s(
 def test_login_tools_have_no_elapsed_s() -> None:
     with _with_client(get_login_status=True):
         assert "elapsed_s" not in _payload("get_login_status")
+
+
+# ── 排序方式与整片时长 ──────────────────────────────────────────────────────
+
+
+def test_get_comments_exposes_sort_modes() -> None:
+    """对外是语义名，平台的 mode 编码不出现在 schema 里。"""
+
+    async def scenario() -> dict[str, Any]:
+        server = create_server_for_test()
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
+            await client.initialize()
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["get_comments"].inputSchema["properties"]["mode"]
+
+    spec = _run(scenario)
+    assert set(spec.get("enum") or []) == {"hot", "newest"}
+    assert spec.get("default") == "hot"
+    assert "3" not in spec.get("description", "")
+
+
+def test_get_comments_passes_sort_through() -> None:
+    seen: dict[str, object] = {}
+
+    def _capture(video_id, *, count, cursor=None, sort="hot"):
+        seen.update(video_id=video_id, count=count, sort=sort)
+        return Page(items=[])
+
+    with _with_client(get_comments=_capture):
+        _payload("get_comments", {"url": BV_URL, "count": 5, "mode": "newest"})
+    assert seen["sort"] == "newest"
+
+
+def test_get_video_info_reports_total_duration() -> None:
+    info = VideoInfo(id="BV1", title="t", duration_sec=79.0, total_duration_sec=81976.0)
+    with _with_client(get_video_info=info):
+        payload = _payload("get_video_info", {"url": BV_URL})
+    assert payload["duration_sec"] == 79.0
+    assert payload["total_duration_sec"] == 81976.0
+
+
+def test_get_frame_description_omits_deployment_detail() -> None:
+    """ffmpeg 装没装是部署方的事，模型改变不了，缺了会有报错兜住。"""
+
+    async def scenario() -> str:
+        server = create_server_for_test()
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
+            await client.initialize()
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["get_frame"].description or ""
+
+    assert "ffmpeg" not in _run(scenario)

@@ -95,6 +95,8 @@ def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, in
         published_at=to_local_time(view.get("pubdate")),
         summary=_summary_of(view),
         duration_sec=float(duration) if duration else None,
+        # 顶层 duration 是整片时长（实测等于各段之和），多段分支里被换成了分段时长，这里补回。
+        total_duration_sec=_float_or_none(view.get("duration")),
         view_count=stat.get("view"),
         danmaku_count_total=stat.get("danmaku"),
         comment_count=stat.get("reply"),
