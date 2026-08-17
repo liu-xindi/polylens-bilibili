@@ -32,12 +32,20 @@ def _image_urls(content: dict[str, Any]) -> str | None:
 
 
 def _link_titles(content: dict[str, Any]) -> str | None:
-    """评论原文里只有裸链接，标题在同一份响应的 jump_url 里，不必另发请求。"""
+    """评论原文里只有裸链接，标题在同一份响应的 jump_url 里，不必另发请求。
+
+    jump_url 里混着两类条目：键是 URL 的才是链接，键是词的是平台自动加的可点击搜索词
+    （其 title 与键相同），后者不是评论内容，取进来只会制造噪声。
+    """
     jump_url = content.get("jump_url") or {}
     if not isinstance(jump_url, dict):
         return None
     return _joined([
-        str(v["title"]) for v in jump_url.values() if isinstance(v, dict) and v.get("title")
+        str(entry["title"])
+        for key, entry in jump_url.items()
+        if str(key).startswith(("http://", "https://"))
+        and isinstance(entry, dict)
+        and entry.get("title")
     ])
 
 

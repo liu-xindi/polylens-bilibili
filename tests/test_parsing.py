@@ -415,3 +415,26 @@ def test_normalize_reply_takes_link_titles_from_jump_url():
     }))
     assert c.content == "https://b23.tv/x"
     assert c.link_titles == "教你开启英文视频的中文字幕"
+
+
+def test_normalize_reply_skips_keyword_entries_in_jump_url():
+    """jump_url 还装着平台自动识别的可点击搜索词（键是词本身），那不是评论里的链接。"""
+    c = _normalize_reply(_reply(content={
+        "message": "应该叫 aarch64 吧，装 binutils 就行",
+        "jump_url": {
+            "aarch64": {"title": "aarch64", "state": 0, "extra": {}},
+            "binutils": {"title": "binutils", "state": 0, "extra": {}},
+        },
+    }))
+    assert c.link_titles is None
+
+
+def test_normalize_reply_keeps_only_real_links_when_mixed():
+    c = _normalize_reply(_reply(content={
+        "message": "看 https://b23.tv/x 讲的 aarch64",
+        "jump_url": {
+            "https://b23.tv/x": {"title": "某个视频", "state": 0},
+            "aarch64": {"title": "aarch64", "state": 0, "extra": {}},
+        },
+    }))
+    assert c.link_titles == "某个视频"
