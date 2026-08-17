@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 from .api._comments import fetch_comments, fetch_replies
 from .api._constants import SHORT_LINK_HOSTS, USER_AGENT
 from .api._danmaku import fetch_danmaku, top_by_heat
+from .api._feed import fetch_feed
 from .api._frame import fetch_frame
 from .api._http import HttpClient, _RateLimited
 from .api._login import check_qr_login, start_qr_login
@@ -25,6 +26,7 @@ from .errors import BilibiliError
 from .models import (
     Comment,
     Danmaku,
+    FeedItem,
     LoginCheckResult,
     Page,
     QrLoginSession,
@@ -174,6 +176,9 @@ class BilibiliClient:
         self, *, query: str, count: int, cursor: str | None = None
     ) -> Page[SearchItem]:
         return fetch_search(self._http, query, count=count, cursor=cursor)
+
+    def get_feed(self, *, count: int) -> list[FeedItem]:
+        return fetch_feed(self._http, count=count)
 
 
 def _id_params(video_id: str) -> dict[str, Any]:

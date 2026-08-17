@@ -21,6 +21,7 @@ ENDPOINTS: dict[str, str] = {
     "qrcode_generate": "/x/passport-login/web/qrcode/generate",
     "qrcode_poll": "/x/passport-login/web/qrcode/poll",
     "search_type": "/x/web-interface/wbi/search/type",
+    "feed_rcmd": "/x/web-interface/wbi/index/top/feed/rcmd",
 }
 
 # 搜索结果总数封顶（前端翻页亦止于此）。

@@ -158,6 +158,19 @@ class SearchItem:
 
 
 @dataclass(slots=True)
+class FeedItem:
+    """首页推荐流的一条。url 可直接传给内容类工具。"""
+
+    title: str
+    url: str
+    author: str | None
+    published_at: str | None  # 本机时区可读时间
+    duration: str | None  # 时长文本，如 3:45
+    view_count: int | None
+    rcmd_reason: str | None  # 平台给的推荐理由，多数条目没有
+
+
+@dataclass(slots=True)
 class SubtitleEntry:
     """一条字幕。时间轴单位为秒，保留一位小数。"""
 

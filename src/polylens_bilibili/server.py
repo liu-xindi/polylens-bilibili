@@ -25,6 +25,7 @@ from .errors import BilibiliError
 from .models import (
     Comment,
     Danmaku,
+    FeedItem,
     QrStatus,
     SearchItem,
     SubtitleEntry,
@@ -140,6 +141,17 @@ class SearchResult(BaseModel):
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
 
 
+class FeedResult(BaseModel):
+    count: int = Field(description="本批返回的视频条数")
+    feed: str = Field(
+        description=(
+            f"{_TOON_NOTE} 列为 title,url,author,published_at,duration,view_count,rcmd_reason。"
+            "url 可直接传给内容类工具；rcmd_reason 是平台给的推荐理由，多数条目没有。"
+        )
+    )
+    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+
+
 class LoginStateResult(BaseModel):
     is_login: bool | None = Field(
         description="true 已登录，false 未登录，null 表示无法验证（网络或平台异常）"
@@ -215,11 +227,11 @@ def _make_qr_png(url: str) -> bytes:
 
 _SERVER_INSTRUCTIONS = (
     "本服务从 B 站视频中提取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
-    "并支持按关键词搜索视频。"
-    "内容类工具的 url 参数接受视频链接、b23.tv 短链或裸 BV/av 号；没有链接时先用 "
-    "search_videos 找。"
+    "并支持按关键词搜索视频、刷首页推荐。"
+    "内容类工具的 url 参数接受视频链接、b23.tv 短链或裸 BV/av 号；没有链接时用 "
+    "search_videos 按关键词找，或用 get_feed 看平台推什么。"
     "评论、楼中楼、字幕、视频帧需要登录，未登录时会明确报错；"
-    "元信息、分段、弹幕、搜索无需登录。登录用 set_cookie 写入浏览器 Cookie，"
+    "元信息、分段、弹幕、搜索、首页推荐无需登录。登录用 set_cookie 写入浏览器 Cookie，"
     "或用 start_qr_login 扫码。"
     "翻页统一：has_more=true 时把同一处返回的 next_cursor 原样回传给 cursor 取下一批，"
     "=false 表示已到底；游标不透明，不要自造或解析。"
@@ -472,6 +484,26 @@ def create_server(
             has_more=page.has_more,
             next_cursor=page.next_cursor,
         )
+
+    @mcp.tool(annotations=_READS_PLATFORM)
+    @_timed
+    def get_feed(
+        count: Annotated[
+            int,
+            Field(
+                description=(
+                    "想要的视频条数。平台单次有上限，超出会被平台拒绝并报错。"
+                )
+            ),
+        ],
+    ) -> FeedResult:
+        """刷 B 站首页推荐流，看平台现在推什么。
+
+        登录后按账号口味推，未登录给通用推荐。每次调用都是新的一批，想多刷就多调几次；
+        这个流没有尽头也没有位置，既不能重放也不保证跨次调用不重复，要去重就按 url 自己去。
+        """
+        items = _client().get_feed(count=count)
+        return FeedResult(count=len(items), feed=to_toon("feed", items, FeedItem))
 
     @mcp.tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:

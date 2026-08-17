@@ -17,6 +17,7 @@ from polylens_bilibili.errors import AuthRequiredError
 from polylens_bilibili.models import (
     Comment,
     Danmaku,
+    FeedItem,
     LoginCheckResult,
     Page,
     QrLoginSession,
@@ -31,7 +32,7 @@ from polylens_bilibili.models import (
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 _TOOL_NAMES = {
     "get_video_info", "get_parts", "get_comments", "get_comment_replies", "get_danmaku",
-    "get_subtitles", "get_frame", "search_videos",
+    "get_subtitles", "get_frame", "search_videos", "get_feed",
     "get_login_status", "set_cookie", "logout", "start_qr_login", "check_qr_login",
 }
 
@@ -454,3 +455,45 @@ def test_get_frame_description_omits_deployment_detail() -> None:
             return tools["get_frame"].description or ""
 
     assert "ffmpeg" not in _run(scenario)
+
+
+# ── 首页推荐 ────────────────────────────────────────────────────────────────
+
+
+def test_get_feed_returns_toon() -> None:
+    items = [
+        FeedItem(title="t1", url="u1", author="甲", published_at="2026-08-17 10:00",
+                 duration="3:45", view_count=1234, rcmd_reason="1万点赞"),
+        FeedItem(title="t2", url="u2", author=None, published_at=None,
+                 duration=None, view_count=None, rcmd_reason=None),
+    ]
+    with _with_client(get_feed=items):
+        payload = _payload("get_feed", {"count": 2})
+    assert payload["count"] == 2
+    assert payload["feed"].startswith(
+        "feed[2]{title,url,author,published_at,duration,view_count,rcmd_reason}:"
+    )
+    assert "1万点赞" in payload["feed"]
+    assert payload["elapsed_s"] >= 0
+
+
+def test_get_feed_takes_no_url() -> None:
+    """它是入口而不是围绕某条内容的工具。"""
+
+    async def scenario() -> dict[str, Any]:
+        server = create_server_for_test()
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
+            await client.initialize()
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["get_feed"].inputSchema
+
+    schema = _run(scenario)
+    assert set(schema["properties"]) == {"count"}
+    assert schema["required"] == ["count"]
+
+
+def test_get_feed_empty_batch() -> None:
+    with _with_client(get_feed=[]):
+        payload = _payload("get_feed", {"count": 5})
+    assert payload["count"] == 0
+    assert payload["feed"].startswith("feed[0]{")
