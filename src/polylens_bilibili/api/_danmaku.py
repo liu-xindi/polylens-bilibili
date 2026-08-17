@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
+from ..errors import BilibiliError
 from ..models import Danmaku
 from ._constants import DANMAKU_XML_URL
 from ._http import HttpClient, inflate_deflate
@@ -47,8 +48,9 @@ def fetch_danmaku(client: HttpClient, cid: int) -> list[Danmaku]:
 
 def top_by_heat(bullets: list[Danmaku], count: int) -> list[Danmaku]:
     """从全量弹幕取最热 count 条，再按时间轴升序返回。"""
-    want = max(1, count)
-    if want >= len(bullets):
+    if count < 1:
+        raise BilibiliError(f"count 需为正整数，收到 {count}")
+    if count >= len(bullets):
         return sorted(bullets, key=lambda b: b.timestamp)
-    hottest = sorted(bullets, key=lambda b: b.heat, reverse=True)[:want]
+    hottest = sorted(bullets, key=lambda b: b.heat, reverse=True)[:count]
     return sorted(hottest, key=lambda b: b.timestamp)

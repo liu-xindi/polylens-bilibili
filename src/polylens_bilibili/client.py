@@ -15,12 +15,12 @@ from .api._comments import fetch_comments, fetch_replies
 from .api._constants import SHORT_LINK_HOSTS, USER_AGENT
 from .api._danmaku import fetch_danmaku, top_by_heat
 from .api._frame import fetch_frame
-from .api._http import HttpClient
+from .api._http import HttpClient, _RateLimited
 from .api._login import check_qr_login, start_qr_login
 from .api._search import fetch_search
 from .api._signing import fetch_nav
-from .api._subtitles import fetch_subtitles
-from .api._video import build_video_info, cid_for_page, clip_duration, fetch_view
+from .api._subtitles import SubtitleTrack, fetch_subtitles
+from .api._video import build_video_info, cid_for_page, clip_duration, fetch_view, list_parts
 from .errors import BilibiliError
 from .models import (
     Comment,
@@ -30,8 +30,8 @@ from .models import (
     QrLoginSession,
     ReplyThread,
     SearchItem,
-    SubtitleEntry,
     VideoInfo,
+    VideoPart,
 )
 
 _BV_RE = re.compile(r"BV[0-9A-Za-z]+")
@@ -78,9 +78,12 @@ def resolve_video(url: str, page: int | None = None) -> tuple[str, int]:
 
     分段序号取值顺序：显式传入 > 链接里的 ?p=N > 第 1 段。
     """
+    if page is not None and page < 1:
+        raise BilibiliError(f"page 需为正整数，收到 {page}")
     expanded = _expand_short_link(url)
+    # 链接自带的 ?p=0 由 _extract_page 归入"没写"，不为它报错：这样的链接在网页上照样能打开。
     chosen = page if page is not None else _extract_page(expanded)
-    return _extract_video_id(expanded), max(1, chosen or 1)
+    return _extract_video_id(expanded), chosen or 1
 
 
 class BilibiliClient:
@@ -93,10 +96,14 @@ class BilibiliClient:
         return fetch_view(self._http, _id_params(video_id))
 
     def get_login_status(self) -> bool | None:
-        """调平台接口核验 cookie 是否有效。None 表示无法验证。"""
+        """调平台接口核验 cookie 是否有效。None 表示无法验证。
+
+        只把"确实无从判断"的情形归为 None：网络不可达、平台报错或改了响应形状、触发风控。
+        其余异常照常上浮，免得代码缺陷被伪装成"平台不给答案"。
+        """
         try:
             return fetch_nav(self._http).is_login
-        except Exception:
+        except (BilibiliError, _RateLimited, OSError, ValueError, KeyError):
             return None
 
     def start_qr_login(self) -> QrLoginSession:
@@ -132,16 +139,23 @@ class BilibiliClient:
         bullets = fetch_danmaku(self._http, cid_for_page(view, page))
         return top_by_heat(bullets, count)
 
-    def get_subtitles(self, video_id: str, page: int = 1) -> list[SubtitleEntry]:
+    def get_subtitles(
+        self, video_id: str, page: int = 1, lang: str | None = None
+    ) -> SubtitleTrack:
         view = self._view(video_id)
         _info, aid, cid = build_video_info(view, page)
-        return fetch_subtitles(self._http, aid, cid)
+        return fetch_subtitles(self._http, aid, cid, lang)
+
+    def get_parts(self, video_id: str) -> list[VideoPart]:
+        return list_parts(self._view(video_id))
 
     def get_frame(self, video_id: str, *, timestamp: float, page: int = 1) -> bytes:
+        at = float(timestamp)
+        if at < 0:
+            raise BilibiliError(f"timestamp 不能为负数，收到 {at:g}")
         view = self._view(video_id)
         bvid = str(view.get("bvid") or video_id)
         cid = cid_for_page(view, page)
-        at = max(0.0, float(timestamp))
         duration = clip_duration(view, cid)
         if duration is not None and at > duration:
             raise BilibiliError(f"请求的时间 {at:g} 秒超出视频时长（约 {duration:g} 秒）")

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import BilibiliError
-from ..models import VideoInfo, to_local_time
+from ..models import VideoInfo, VideoPart, to_local_time
 from ._constants import ENDPOINTS
 from ._http import HttpClient
 
@@ -72,8 +72,14 @@ def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, in
 
     标题/作者/统计为整片信息（全段共用）；分段信息只在多段视频上给出。
     """
-    aid = int(view.get("aid", 0))
-    bvid = str(view.get("bvid", ""))
+    # aid 与 bvid 是后续能力的定位依据：aid 给评论接口，bvid 进对外链接。
+    # 缺了给默认值会让评论去查 oid=0、链接拼成 /video//，错误推迟到更难定位的地方。
+    if not view.get("aid"):
+        raise BilibiliError("视频数据缺少 aid，无法定位该视频")
+    if not view.get("bvid"):
+        raise BilibiliError("视频数据缺少 bvid，无法定位该视频")
+    aid = int(view["aid"])
+    bvid = str(view["bvid"])
     selected = _resolve_page(view, page)
     cid = int(selected["cid"])
     stat = view.get("stat") or {}
@@ -90,7 +96,7 @@ def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, in
         summary=_summary_of(view),
         duration_sec=float(duration) if duration else None,
         view_count=stat.get("view"),
-        danmaku_count=stat.get("danmaku"),
+        danmaku_count_total=stat.get("danmaku"),
         comment_count=stat.get("reply"),
         like_count=stat.get("like"),
         favorite_count=stat.get("favorite"),
@@ -104,8 +110,23 @@ def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, in
     if is_multi:
         info.current_page = selected.get("page") or page
         info.current_part = selected.get("part")
-        info.parts = [
-            {"page": p.get("page"), "part": p.get("part"), "duration": p.get("duration")}
-            for p in pages
-        ]
     return info, aid, cid
+
+
+def list_parts(view: dict[str, Any]) -> list[VideoPart]:
+    """分段清单。单段视频返回一项。"""
+    pages = view.get("pages") or []
+    if not pages:
+        return [VideoPart(page=1, part=None, duration=_float_or_none(view.get("duration")))]
+    return [
+        VideoPart(
+            page=int(p.get("page") or index),
+            part=p.get("part"),
+            duration=_float_or_none(p.get("duration")),
+        )
+        for index, p in enumerate(pages, start=1)
+    ]
+
+
+def _float_or_none(value: Any) -> float | None:
+    return float(value) if value else None

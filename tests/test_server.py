@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from polylens_bilibili import server as server_mod
+from polylens_bilibili.api._subtitles import SubtitleTrack
 from polylens_bilibili.errors import AuthRequiredError
 from polylens_bilibili.models import (
     Comment,
@@ -23,12 +25,13 @@ from polylens_bilibili.models import (
     SearchItem,
     SubtitleEntry,
     VideoInfo,
+    VideoPart,
 )
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 _TOOL_NAMES = {
-    "get_video_info", "get_comments", "get_comment_replies", "get_danmaku",
-    "get_subtitles", "get_frame", "search",
+    "get_video_info", "get_parts", "get_comments", "get_comment_replies", "get_danmaku",
+    "get_subtitles", "get_frame", "search_videos",
     "get_login_status", "set_cookie", "logout", "start_qr_login", "check_qr_login",
 }
 
@@ -143,11 +146,13 @@ def test_get_video_info_returns_named_fields() -> None:
     assert payload["elapsed_s"] >= 0
 
 
-def _comment(cid: str, content: str) -> Comment:
-    return Comment(
+def _comment(cid: str, content: str, **kw: Any) -> Comment:
+    base = Comment(
         id=cid, author="u", content=content, like_count=0, reply_count=0,
-        parent_id=None, created_at=None,
+        parent_id=None, created_at=None, is_top=False, up_liked=False,
+        image_urls=None, link_titles=None,
     )
+    return replace(base, **kw)
 
 
 def test_get_comments_returns_toon_and_paging() -> None:
@@ -159,7 +164,8 @@ def test_get_comments_returns_toon_and_paging() -> None:
     assert payload["has_more"] is True
     assert payload["next_cursor"] == "tok"
     assert payload["comments"].startswith(
-        "comments[2]{id,author,content,like_count,reply_count,parent_id,created_at}:"
+        "comments[2]{id,author,content,like_count,reply_count,parent_id,created_at,"
+        "is_top,up_liked,image_urls,link_titles}:"
     )
 
 
@@ -195,12 +201,38 @@ def test_get_danmaku_returns_toon() -> None:
     assert payload["danmaku"] == "danmaku[1]{content,timestamp,heat}:\n  弹,0,7"
 
 
-def test_get_subtitles_returns_toon() -> None:
-    entries = [SubtitleEntry(start=1.0, end=2.0, content="一句")]
-    with _with_client(get_subtitles=entries):
+def test_get_subtitles_returns_toon_with_lang_info() -> None:
+    track = SubtitleTrack([SubtitleEntry(start=1.0, end=2.0, content="一句")], "ai-zh",
+                          ["en-US", "ai-zh"])
+    with _with_client(get_subtitles=track):
         payload = _payload("get_subtitles", {"url": BV_URL})
     assert payload["count"] == 1
+    assert payload["lang"] == "ai-zh"  # 默认取首条时也告知实际语种
+    assert payload["available_langs"] == ["en-US", "ai-zh"]
     assert payload["subtitles"] == "subtitles[1]{start,end,content}:\n  1,2,一句"
+
+
+def test_get_subtitles_passes_lang_through() -> None:
+    seen: dict[str, object] = {}
+
+    def _capture(video_id, page=1, lang=None):
+        seen.update(video_id=video_id, page=page, lang=lang)
+        return SubtitleTrack([], "en-US", ["en-US"])
+
+    with _with_client(get_subtitles=_capture):
+        _payload("get_subtitles", {"url": BV_URL + "?p=3", "lang": "en-US"})
+    assert seen == {"video_id": "BV1xx411c7mD", "page": 3, "lang": "en-US"}
+
+
+def test_get_parts_returns_toon() -> None:
+    parts = [VideoPart(page=1, part="片头", duration=60.0),
+             VideoPart(page=2, part="正片", duration=600.0)]
+    with _with_client(get_parts=parts):
+        payload = _payload("get_parts", {"url": BV_URL})
+    assert payload["count"] == 2
+    assert payload["parts"] == (
+        "parts[2]{page,part,duration}:\n  1,片头,60\n  2,正片,600"
+    )
 
 
 def test_search_returns_toon_and_paging() -> None:
@@ -213,7 +245,7 @@ def test_search_returns_toon_and_paging() -> None:
         next_cursor="1",
     )
     with _with_client(search=page):
-        payload = _payload("search", {"query": "py", "count": 1})
+        payload = _payload("search_videos", {"query": "py", "count": 1})
     assert payload["count"] == 1
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
     assert payload["results"].startswith(
@@ -355,8 +387,8 @@ def test_auth_required_surfaces_with_login_hint() -> None:
     [
         ("get_video_info", {"url": BV_URL}, {"get_video_info": VideoInfo(id="B", title="t")}),
         ("get_comments", {"url": BV_URL, "count": 1}, {"get_comments": Page(items=[])}),
-        ("get_subtitles", {"url": BV_URL}, {"get_subtitles": []}),
-        ("search", {"query": "x", "count": 1}, {"search": Page(items=[])}),
+        ("get_subtitles", {"url": BV_URL}, {"get_subtitles": SubtitleTrack([], None, [])}),
+        ("search_videos", {"query": "x", "count": 1}, {"search": Page(items=[])}),
     ],
 )
 def test_content_tools_attach_elapsed_s(

@@ -118,7 +118,10 @@ class Page[Item]:
 
 @dataclass(slots=True)
 class Comment:
-    """一条评论。楼中楼由 get_comment_replies 单独钻取，不内嵌于此。"""
+    """一条评论。楼中楼由 get_comment_replies 单独钻取，不内嵌于此。
+
+    content 是平台原文：评论里的配图与链接标题另立字段，不改写原文。
+    """
 
     id: str
     author: str
@@ -127,6 +130,10 @@ class Comment:
     reply_count: int
     parent_id: str | None  # 被回复的那条评论 id；仅楼中楼"互回"时出现（回楼主则为 None）
     created_at: str | None  # 本机时区可读时间（见 to_local_time）
+    is_top: bool  # 置顶评论
+    up_liked: bool  # UP 主给这条点过赞
+    image_urls: str | None  # 配图地址，多张以空格分隔
+    link_titles: str | None  # content 里的链接对应的标题，多个以空格分隔
 
 
 @dataclass(slots=True)
@@ -160,6 +167,15 @@ class SubtitleEntry:
 
 
 @dataclass(slots=True)
+class VideoPart:
+    """多段视频的一段。"""
+
+    page: int  # 分段序号，1 起
+    part: str | None  # 该段标题
+    duration: float | None  # 该段时长秒数
+
+
+@dataclass(slots=True)
 class Danmaku:
     """一条弹幕。
 
@@ -185,7 +201,10 @@ class VideoInfo(BaseModel):
         default=None, description="时长秒数；多段视频为当前段的时长"
     )
     view_count: int | None = Field(default=None, description="播放数")
-    danmaku_count: int | None = Field(default=None, description="弹幕总数")
+    danmaku_count_total: int | None = Field(
+        default=None,
+        description="弹幕数，多段视频为全部分段之和，不是当前段的数量",
+    )
     comment_count: int | None = Field(default=None, description="评论数，含楼中楼")
     like_count: int | None = Field(default=None, description="点赞数")
     favorite_count: int | None = Field(default=None, description="收藏数")
@@ -200,8 +219,4 @@ class VideoInfo(BaseModel):
     )
     current_part: str | None = Field(
         default=None, description="当前段的标题，仅多段视频有值"
-    )
-    parts: list[dict[str, Any]] | None = Field(
-        default=None,
-        description="全部分段，每项含 page、part、duration；仅多段视频有值",
     )

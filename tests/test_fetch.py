@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from polylens_bilibili.api._comments import fetch_comments, fetch_replies
+from polylens_bilibili.api._constants import MAIN_PAGE_SIZE
 from polylens_bilibili.api._danmaku import fetch_danmaku
 from polylens_bilibili.api._http import BilibiliHttpError, HttpClient, _RateLimited
 from polylens_bilibili.api._signing import NavInfo
@@ -74,34 +75,66 @@ def test_fetch_comments_empty_replies_returns_empty():
     assert page.has_more is False and page.next_cursor is None
 
 
+def _full_page(seq: int, *, is_end: bool = False) -> dict:
+    """一整页主评论（平台固定 20 条）。不足 20 条会被判为末页。"""
+    return _page(
+        [_reply(seq * 100 + i, f"r{seq}-{i}") for i in range(MAIN_PAGE_SIZE)],
+        is_end=is_end, next_offset=f"offset{seq}",
+    )
+
+
 def test_fetch_comments_count_truncates_with_next_cursor():
-    """每页 1 条、非 is_end、有 offset；count=3 → 翻 3 页够数，has_more=True + next_cursor。"""
+    """每页满 20 条、非 is_end；count=25 → 翻 2 页够数，has_more=True + next_cursor。"""
     call_count = 0
 
     def _get_json(endpoint, params):
         nonlocal call_count
         call_count += 1
-        return _page(
-            [_reply(call_count, f"reply{call_count}")],
-            is_end=False, next_offset=f"offset{call_count}",
-        )
+        return _full_page(call_count)
 
     client = MagicMock()
     client.get_json.side_effect = _get_json
     with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
-        page = fetch_comments(client, aid=100, count=3)
-    assert call_count == 3
-    assert len(page.items) == 3
-    assert page.has_more is True and page.next_cursor == "offset3"
+        page = fetch_comments(client, aid=100, count=25)
+    assert call_count == 2
+    assert len(page.items) == 40
+    assert page.has_more is True and page.next_cursor == "offset2"
 
 
-def test_fetch_comments_normalizes_non_positive_count():
-    """count 归一到至少 1：仍抓一页，不空转。"""
+def test_fetch_comments_short_page_ends_pagination():
+    """末页平台仍可能说没到底并给游标，照搬会让调用方多发一次必然为空的请求。
+
+    实测某视频共 15 条主评论，首页给 14 条（另 1 条在 top_replies）却 is_end=false。
+    """
     client = MagicMock()
-    client.get_json.return_value = _page([_reply(1, "r")])
+    client.get_json.return_value = _page(
+        [_reply(i + 1, f"r{i}") for i in range(14)],
+        is_end=False, next_offset="offset-that-leads-nowhere",
+        top_replies=[_reply(999, "top")],
+    )
+    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+        page = fetch_comments(client, aid=100, count=50)
+    assert len(page.items) == 15  # 置顶 1 条 + 正文 14 条
+    assert client.get_json.call_count == 1  # 不再多探一页
+    assert page.has_more is False and page.next_cursor is None
+
+
+@pytest.mark.parametrize("bad", [0, -3])
+def test_fetch_comments_rejects_non_positive_count(bad: int):
+    client = MagicMock()
     with _nav_patch("_comments"), _SIGN_PATCH:
-        page = fetch_comments(client, aid=100, count=0)
-    assert len(page.items) == 1
+        with pytest.raises(BilibiliError, match="正整数"):
+            fetch_comments(client, aid=100, count=bad)
+    client.get_json.assert_not_called()
+
+
+@pytest.mark.parametrize("bad", [0, -3])
+def test_fetch_replies_rejects_non_positive_limit(bad: int):
+    client = MagicMock()
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        with pytest.raises(BilibiliError, match="正整数"):
+            fetch_replies(client, 100, ["1"], limit=bad)
+    client.get_json.assert_not_called()
 
 
 def test_fetch_comments_cursor_skips_top_replies():
@@ -139,7 +172,7 @@ def test_fetch_comments_requires_login():
 def _sub_page(endpoint, params):
     ps, pn = params["ps"], params["pn"]
     base = (pn - 1) * ps
-    return {"replies": [_reply(base + i, f"r{base + i}") for i in range(ps)]}
+    return {"replies": [_reply(base + i + 1, f"r{base + i}") for i in range(ps)]}
 
 
 def test_fetch_replies_slices_window_by_limit():
@@ -271,10 +304,12 @@ def _subtitle_client(tracks: list[dict]) -> MagicMock:
 def test_fetch_subtitles_returns_entries_with_rounded_timeline():
     client = _subtitle_client([_SUBTITLE_META[0]])
     with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
-        entries = fetch_subtitles(client, aid=100, cid=200)
-    assert len(entries) == 2
-    assert entries[0].content == "first line"
-    assert entries[0].start == 1.0 and entries[0].end == 3.6  # 降精度到一位小数
+        track = fetch_subtitles(client, aid=100, cid=200)
+    assert len(track.entries) == 2
+    assert track.entries[0].content == "first line"
+    assert track.entries[0].start == 1.0 and track.entries[0].end == 3.6  # 降精度到一位小数
+    assert track.lang == "zh-CN"
+    assert track.available_langs == ["zh-CN"]
 
 
 def test_fetch_subtitles_protocol_relative_url_fixed():
@@ -294,7 +329,8 @@ def test_fetch_subtitles_picks_first_track():
 def test_fetch_subtitles_empty_when_no_tracks():
     client = _subtitle_client([])
     with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
-        assert fetch_subtitles(client, aid=100, cid=200) == []
+        track = fetch_subtitles(client, aid=100, cid=200)
+    assert track.entries == [] and track.lang is None and track.available_langs == []
 
 
 def test_fetch_subtitles_requires_login():
@@ -410,9 +446,7 @@ def test_fetch_comments_rate_limited_midpagination_raises():
         call_count += 1
         if call_count == 2:
             raise _RateLimited()
-        return _page(
-            [_reply(call_count, f"reply{call_count}")], is_end=False, next_offset=f"off{call_count}"
-        )
+        return _full_page(call_count)
 
     client = MagicMock()
     client.get_json.side_effect = _get_json
@@ -458,3 +492,40 @@ def test_fetch_frame_requires_login(monkeypatch: pytest.MonkeyPatch) -> None:
         with pytest.raises(AuthRequiredError):
             _frame.fetch_frame(client, "BV1xx", 200, 1.0)
     client.get_json.assert_not_called()
+
+
+# ── 字幕语种 ────────────────────────────────────────────────────────────────
+
+
+def test_fetch_subtitles_defaults_to_first_track():
+    """不指定语种时取平台给的第一条，返回体标明实际拿到的是哪个。"""
+    client = _subtitle_client(_SUBTITLE_META)
+    with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
+        track = fetch_subtitles(client, aid=100, cid=200)
+    assert track.lang == "zh-CN"
+    assert track.available_langs == ["zh-CN", "en"]
+    assert "sub_zh" in client.get_json_url.call_args[0][0]
+
+
+def test_fetch_subtitles_picks_requested_lang():
+    client = _subtitle_client(_SUBTITLE_META)
+    with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
+        track = fetch_subtitles(client, aid=100, cid=200, lang="en")
+    assert track.lang == "en"
+    assert "sub_en" in client.get_json_url.call_args[0][0]
+
+
+def test_fetch_subtitles_unknown_lang_lists_available():
+    """报错里给出可选轨道，调用方能直接改正。"""
+    client = _subtitle_client(_SUBTITLE_META)
+    with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
+        with pytest.raises(BilibiliError, match="zh-CN"):
+            fetch_subtitles(client, aid=100, cid=200, lang="ja")
+
+
+def test_fetch_subtitles_track_without_url_raises():
+    """有轨道却没有地址，与"这个视频没有字幕"是两回事，静默返回空会把它们混为一谈。"""
+    client = _subtitle_client([{"lan": "zh-CN", "subtitle_url": ""}])
+    with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
+        with pytest.raises(BilibiliError, match="地址"):
+            fetch_subtitles(client, aid=100, cid=200)

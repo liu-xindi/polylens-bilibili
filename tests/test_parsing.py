@@ -11,7 +11,12 @@ from polylens_bilibili.api._comments import _normalize_reply
 from polylens_bilibili.api._danmaku import parse_danmaku_xml, top_by_heat
 from polylens_bilibili.api._frame import _pick_stream
 from polylens_bilibili.api._subtitles import _normalize_url
-from polylens_bilibili.api._video import build_video_info, cid_for_page, clip_duration
+from polylens_bilibili.api._video import (
+    build_video_info,
+    cid_for_page,
+    clip_duration,
+    list_parts,
+)
 from polylens_bilibili.errors import BilibiliError
 from polylens_bilibili.models import Danmaku
 
@@ -53,7 +58,7 @@ def test_build_video_info_basic_fields():
     assert cid == 200
     assert info.view_count == 1000
     assert info.like_count == 50
-    assert info.danmaku_count == 10
+    assert info.danmaku_count_total == 10
     assert info.comment_count == 7
     assert info.coin_count == 20
     assert info.published_at == "2023-11-15 06:13"  # 本机时区可读时间
@@ -111,11 +116,10 @@ def test_build_video_info_category_and_duration():
 
 
 def test_build_video_info_single_part_has_no_part_fields():
-    """单段视频不给分段菜单字段。"""
+    """单段视频不给分段字段。"""
     info, _, _ = build_video_info(_view())
     assert info.current_page is None
     assert info.current_part is None
-    assert info.parts is None
 
 
 # ── 多段视频（page → cid）────────────────────────────────────────────────────
@@ -160,7 +164,6 @@ def test_build_video_info_multi_part_selects_cid_and_exposes_parts():
     assert info.current_part == "正片"
     assert info.duration_sec == 600  # 当前段时长，非整片
     assert info.part_count == 3
-    assert [p["part"] for p in info.parts or []] == ["片头", "正片", "片尾"]
 
 
 def test_build_video_info_multi_part_default_page_one():
@@ -280,10 +283,10 @@ def test_top_by_heat_returns_all_when_count_covers():
     assert [b.timestamp for b in top_by_heat(bullets, 10)] == [1, 3]
 
 
-def test_top_by_heat_normalizes_non_positive_count():
-    bullets = [_bullet(1, 1), _bullet(2, 9)]
-    assert len(top_by_heat(bullets, 0)) == 1
-    assert len(top_by_heat(bullets, -5)) == 1
+@pytest.mark.parametrize("bad", [0, -5])
+def test_top_by_heat_rejects_non_positive_count(bad: int):
+    with pytest.raises(BilibiliError, match="正整数"):
+        top_by_heat([_bullet(1, 1)], bad)
 
 
 # ── _normalize_url ──────────────────────────────────────────────────────────
@@ -337,3 +340,78 @@ def test_pick_stream_fallback_tie_prefers_higher():
     """与请求档等距时取更清晰的一档。"""
     streams = [{"id": 32, "codecs": "avc1"}, {"id": 64, "codecs": "avc1"}]
     assert _pick_stream(streams, 48)["id"] == 64
+
+
+# ── list_parts ──────────────────────────────────────────────────────────────
+
+
+def test_list_parts_enumerates_multi_part_video():
+    parts = list_parts(_multi_view())
+    assert [(p.page, p.part, p.duration) for p in parts] == [
+        (1, "片头", 60.0),
+        (2, "正片", 600.0),
+        (3, "片尾", 30.0),
+    ]
+
+
+def test_list_parts_single_video_gives_one_entry():
+    parts = list_parts(_view(duration=42))
+    assert len(parts) == 1
+    assert parts[0].page == 1 and parts[0].duration == 42.0
+
+
+# ── 关键标识缺失时显式失败 ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("missing", ["aid", "bvid"])
+def test_build_video_info_requires_identifiers(missing: str):
+    """缺了给默认值会让评论查 oid=0、链接拼成 /video//，错误推迟到更难定位处。"""
+    view = _view()
+    del view[missing]
+    with pytest.raises(BilibiliError, match=missing):
+        build_video_info(view)
+
+
+def test_normalize_reply_without_rpid_raises():
+    """这个 id 是 get_comment_replies 的入参，给空串会让钻取失败在更远的地方。"""
+    with pytest.raises(BilibiliError, match="rpid"):
+        _normalize_reply({"member": {}, "content": {}})
+
+
+# ── 评论的非文本内容 ────────────────────────────────────────────────────────
+
+
+def test_normalize_reply_flags_default_to_false():
+    c = _normalize_reply(_reply())
+    assert c.is_top is False and c.up_liked is False
+    assert c.image_urls is None and c.link_titles is None
+
+
+def test_normalize_reply_reads_top_and_up_liked():
+    c = _normalize_reply(
+        _reply(reply_control={"is_up_top": True}, up_action={"like": True, "reply": False})
+    )
+    assert c.is_top is True and c.up_liked is True
+
+
+def test_normalize_reply_collects_image_urls():
+    """配图只取地址，宽高与体积不带；缺 img_src 的条目跳过。"""
+    c = _normalize_reply(_reply(content={
+        "message": "看图",
+        "pictures": [
+            {"img_src": "http://a.jpg", "img_width": 392, "img_height": 388},
+            {"img_src": "http://b.jpg"},
+            {"img_width": 1},
+        ],
+    }))
+    assert c.image_urls == "http://a.jpg http://b.jpg"
+
+
+def test_normalize_reply_takes_link_titles_from_jump_url():
+    """标题在同一份响应的 jump_url 里，不必另发请求；content 原文保持裸链接。"""
+    c = _normalize_reply(_reply(content={
+        "message": "https://b23.tv/x",
+        "jump_url": {"https://b23.tv/x": {"title": "教你开启英文视频的中文字幕", "state": 0}},
+    }))
+    assert c.content == "https://b23.tv/x"
+    assert c.link_titles == "教你开启英文视频的中文字幕"

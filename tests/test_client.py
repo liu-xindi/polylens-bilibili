@@ -85,9 +85,15 @@ def test_resolve_video_page_precedence() -> None:
     assert resolve_video(BV_URL)[1] == 1
 
 
-def test_resolve_video_normalizes_non_positive_page() -> None:
-    assert resolve_video(BV_URL, 0)[1] == 1
-    assert resolve_video(BV_URL, -3)[1] == 1
+@pytest.mark.parametrize("bad", [0, -3])
+def test_resolve_video_rejects_non_positive_page(bad: int) -> None:
+    with pytest.raises(BilibiliError, match="正整数"):
+        resolve_video(BV_URL, bad)
+
+
+def test_link_with_zero_page_falls_back_instead_of_failing() -> None:
+    """?p=0 是链接自带的，不是模型传的；这样的链接在网页上照样能打开，不该为它报错。"""
+    assert resolve_video(BV_URL + "?p=0")[1] == 1
 
 
 # ── 视频号 → 接口参数 ───────────────────────────────────────────────────────
@@ -113,10 +119,21 @@ def test_get_login_status_reports_platform_answer(is_login: bool) -> None:
         assert BilibiliClient().get_login_status() is is_login
 
 
-def test_get_login_status_returns_none_when_unverifiable() -> None:
-    """网络或平台异常时给 null，与"确定未登录"区分开。"""
-    with patch.object(client_mod, "fetch_nav", side_effect=RuntimeError("boom")):
+@pytest.mark.parametrize(
+    "failure",
+    [OSError("network down"), BilibiliError("接口返回失败: -400"), KeyError("wbi_img")],
+)
+def test_get_login_status_returns_none_when_unverifiable(failure: Exception) -> None:
+    """网络不可达、平台报错、响应改形状都归为 null，与"确定未登录"区分开。"""
+    with patch.object(client_mod, "fetch_nav", side_effect=failure):
         assert BilibiliClient().get_login_status() is None
+
+
+def test_get_login_status_lets_unexpected_errors_surface() -> None:
+    """代码缺陷不该被伪装成"平台不给答案"。"""
+    with patch.object(client_mod, "fetch_nav", side_effect=TypeError("bug")):
+        with pytest.raises(TypeError):
+            BilibiliClient().get_login_status()
 
 
 # ── 能力入口的参数处理 ──────────────────────────────────────────────────────
@@ -139,15 +156,14 @@ def _view_stub(duration: float | None = 100.0) -> dict[str, Any]:
     }
 
 
-def test_get_frame_clamps_negative_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict[str, float] = {}
-    monkeypatch.setattr(BilibiliClient, "_view", lambda self, vid: _view_stub())
+def test_get_frame_rejects_negative_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[int] = []
     monkeypatch.setattr(
-        client_mod, "fetch_frame",
-        lambda http, bvid, cid, at: seen.setdefault("at", at) or b"jpeg",
+        BilibiliClient, "_view", lambda self, vid: called.append(1) or _view_stub()
     )
-    BilibiliClient().get_frame("BV1xx", timestamp=-5.0)
-    assert seen["at"] == 0.0
+    with pytest.raises(BilibiliError, match="负数"):
+        BilibiliClient().get_frame("BV1xx", timestamp=-5.0)
+    assert not called  # 校验在取视频数据之前
 
 
 def test_get_frame_rejects_timestamp_beyond_duration(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -38,7 +38,11 @@ def _parse_offset(cursor: str | None) -> int:
         raise BilibiliError(
             f"无法识别的续取游标: {cursor!r}；请原样回传上次返回的 next_cursor"
         ) from None
-    return max(0, offset)
+    if offset < 0:
+        raise BilibiliError(
+            f"无法识别的续取游标: {cursor!r}；请原样回传上次返回的 next_cursor"
+        )
+    return offset
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -102,7 +106,9 @@ def fetch_search(
     query = keyword.strip()
     if not query:
         raise BilibiliError("搜索关键词不能为空")
-    size = max(1, count)
+    if count < 1:
+        raise BilibiliError(f"count 需为正整数，收到 {count}")
+    size = count
     offset = _parse_offset(cursor)
     page_num, skip = divmod(offset, size)
     nav = fetch_nav(client)

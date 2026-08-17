@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -13,6 +15,7 @@ from polylens_bilibili.models import (
     SearchItem,
     SubtitleEntry,
     VideoInfo,
+    VideoPart,
     to_local_time,
     to_toon,
     toon_table,
@@ -86,30 +89,44 @@ def test_toon_bool_is_lowercase_literal() -> None:
 # ── to_toon：列由数据类字段派生，表头固定 ───────────────────────────────────
 
 
-def test_comments_toon_columns_are_fixed() -> None:
-    """列固定，与本批数据无关；计数为 0 照常写出，id 为数字串加引号。"""
-    out = to_toon(
-        "comments",
-        [Comment(id="1", author="u", content="hi", like_count=0, reply_count=0,
-                 parent_id=None, created_at=None)],
-        Comment,
+def _comment(**kw: Any) -> Comment:
+    base = Comment(
+        id="1", author="u", content="hi", like_count=0, reply_count=0,
+        parent_id=None, created_at=None, is_top=False, up_liked=False,
+        image_urls=None, link_titles=None,
     )
+    return replace(base, **kw)
+
+
+def test_comments_toon_columns_are_fixed() -> None:
+    """列固定，与本批数据无关；计数为 0 照常写出，id 为数字串加引号，布尔写成字面量。"""
+    out = to_toon("comments", [_comment()], Comment)
     expect = (
-        'comments[1]{id,author,content,like_count,reply_count,parent_id,created_at}:\n'
-        '  "1",u,hi,0,0,,'
+        "comments[1]{id,author,content,like_count,reply_count,parent_id,created_at,"
+        "is_top,up_liked,image_urls,link_titles}:\n"
+        '  "1",u,hi,0,0,,,false,false,,'
     )
     assert out == expect
 
 
-def test_comments_toon_parent_id_column_stays_when_batch_has_none() -> None:
-    """整批都没有 parent_id 时列仍在，只是留空：表头稳定，消费端不用逐批解析列。"""
-    head = to_toon(
+def test_comments_toon_optional_columns_stay_when_batch_has_none() -> None:
+    """整批都没有的列仍在，只是留空：表头稳定，消费端不用逐批解析列。"""
+    head = to_toon("comments", [_comment()], Comment).split("\n")[0]
+    for column in ("parent_id", "image_urls", "link_titles"):
+        assert column in head
+
+
+def test_comments_toon_carries_images_and_link_titles() -> None:
+    """配图与链接标题各占一列，多个值以空格分隔。"""
+    row = to_toon(
         "comments",
-        [Comment(id="1", author="u", content="a", like_count=0, reply_count=0,
-                 parent_id=None, created_at=None)],
+        [_comment(is_top=True, up_liked=True, image_urls="http://a.jpg http://b.jpg",
+                  link_titles="标题一 标题二")],
         Comment,
-    ).split("\n")[0]
-    assert "parent_id" in head
+    ).split("\n")[1]
+    assert "true,true" in row
+    assert "http://a.jpg http://b.jpg" in row
+    assert "标题一 标题二" in row
 
 
 def test_danmaku_toon_keeps_zero_timestamp() -> None:
@@ -158,9 +175,18 @@ def test_video_info_keeps_all_fields_including_none_and_zero() -> None:
     d = VideoInfo(id="BV1", title="t", view_count=0).model_dump()
     assert d["view_count"] == 0
     assert d["author"] is None
-    assert d["parts"] is None
-    assert set(d) >= {"id", "title", "author", "url", "published_at", "summary",
-                      "duration_sec", "view_count", "danmaku_count", "comment_count",
+    assert set(d) == {"id", "title", "author", "url", "published_at", "summary",
+                      "duration_sec", "view_count", "danmaku_count_total", "comment_count",
                       "like_count", "favorite_count", "share_count", "coin_count",
                       "cover_url", "part_count", "category_id", "category_name",
-                      "current_page", "current_part", "parts"}
+                      "current_page", "current_part"}
+
+
+def test_video_info_has_no_parts_list() -> None:
+    """分段清单走 get_parts，不塞进单条元信息里。"""
+    assert "parts" not in VideoInfo(id="BV1", title="t").model_dump()
+
+
+def test_parts_toon_shape() -> None:
+    out = to_toon("parts", [VideoPart(page=2, part="正片", duration=600.0)], VideoPart)
+    assert out == "parts[1]{page,part,duration}:\n  2,正片,600"

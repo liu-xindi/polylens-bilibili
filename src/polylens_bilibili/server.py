@@ -29,6 +29,7 @@ from .models import (
     SearchItem,
     SubtitleEntry,
     VideoInfo,
+    VideoPart,
     to_toon,
 )
 
@@ -99,9 +100,28 @@ class DanmakuResult(BaseModel):
 class SubtitlesResult(BaseModel):
     video_id: str = Field(description="解析出的视频号")
     count: int = Field(description="字幕条数")
+    lang: str | None = Field(
+        default=None, description="本次实际取的轨道语种；该段没有字幕时为 null"
+    )
+    available_langs: list[str] = Field(
+        default_factory=list,
+        description="该段可选的全部轨道语种，其中任一个都可以传给 lang 参数",
+    )
     subtitles: str = Field(
         description=(
             f"{_TOON_NOTE} 列为 start,end,content，起止为视频内秒数，保留一位小数。"
+        )
+    )
+    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+
+
+class PartsResult(BaseModel):
+    video_id: str = Field(description="解析出的视频号")
+    count: int = Field(description="分段总数")
+    parts: str = Field(
+        description=(
+            f"{_TOON_NOTE} 列为 page,part,duration。page 是分段序号，可传给内容类工具的 "
+            "page 参数；duration 为该段时长秒数。"
         )
     )
     elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
@@ -190,10 +210,13 @@ def _make_qr_png(url: str) -> bytes:
 
 
 _SERVER_INSTRUCTIONS = (
-    "本服务从 B 站视频中提取信息：元信息、评论、楼中楼、弹幕、字幕、视频帧，并支持按关键词搜索。"
-    "内容类工具的 url 参数接受视频链接、b23.tv 短链或裸 BV/av 号。"
+    "本服务从 B 站视频中提取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
+    "并支持按关键词搜索视频。"
+    "内容类工具的 url 参数接受视频链接、b23.tv 短链或裸 BV/av 号；没有链接时先用 "
+    "search_videos 找。"
     "评论、楼中楼、字幕、视频帧需要登录，未登录时会明确报错；"
-    "元信息、弹幕、搜索无需登录。登录用 set_cookie 写入浏览器 Cookie，或用 start_qr_login 扫码。"
+    "元信息、分段、弹幕、搜索无需登录。登录用 set_cookie 写入浏览器 Cookie，"
+    "或用 start_qr_login 扫码。"
     "翻页统一：has_more=true 时把同一处返回的 next_cursor 原样回传给 cursor 取下一批，"
     "=false 表示已到底；游标不透明，不要自造或解析。"
     "列表类数据以 TOON 表格串返回，表头固定，同一工具每次返回的列相同。"
@@ -324,8 +347,8 @@ def create_server(
             int,
             Field(
                 description=(
-                    "想要的弹幕条数。从整片弹幕里取最热的这么多条，结果仍按时间轴排序；"
-                    "达到或超过弹幕总数即返回全部。总数见 get_video_info 的 danmaku_count。"
+                    "想要的弹幕条数。从该段弹幕里取最热的这么多条，结果仍按时间轴排序；"
+                    "达到或超过该段弹幕总数即返回全部。"
                 )
             ),
         ],
@@ -345,14 +368,40 @@ def create_server(
     def get_subtitles(
         url: Annotated[str, Field(description=_URL_DESC)],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
+        lang: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "轨道语种，如 zh-CN、en-US、ai-zh。不传则取平台给的第一条，"
+                    "而各段的轨道构成可能不同，要跨段拿同一语种就显式指定。"
+                    "可选值见返回的 available_langs。"
+                )
+            ),
+        ] = None,
     ) -> SubtitlesResult:
-        """获取视频字幕，逐句返回。字幕为 AI 生成，可能有误。需要登录。"""
+        """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。需要登录。"""
         video_id, part = resolve_video(url, page)
-        entries = _client().get_subtitles(video_id, part)
+        track = _client().get_subtitles(video_id, part, lang)
         return SubtitlesResult(
             video_id=video_id,
-            count=len(entries),
-            subtitles=to_toon("subtitles", entries, SubtitleEntry),
+            count=len(track.entries),
+            lang=track.lang,
+            available_langs=track.available_langs,
+            subtitles=to_toon("subtitles", track.entries, SubtitleEntry),
+        )
+
+    @mcp.tool(annotations=_READS_PLATFORM)
+    @_timed
+    def get_parts(
+        url: Annotated[str, Field(description=_URL_DESC)],
+    ) -> PartsResult:
+        """列出多段视频（分 P）的全部分段。单段视频返回一项。"""
+        video_id, _ = resolve_video(url)
+        parts = _client().get_parts(video_id)
+        return PartsResult(
+            video_id=video_id,
+            count=len(parts),
+            parts=to_toon("parts", parts, VideoPart),
         )
 
     # structured_output=False：FastMCP 默认会把返回值复制进 structuredContent，对本工具即把图片的
@@ -377,8 +426,11 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
-    def search(
-        query: Annotated[str, Field(description="搜索关键词。")],
+    def search_videos(
+        query: Annotated[
+            str,
+            Field(description="搜索关键词，可以是标题、UP 主名、内容主题。"),
+        ],
         count: Annotated[
             int,
             Field(
@@ -390,7 +442,11 @@ def create_server(
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> SearchResult:
-        """按关键词搜索视频，每条附链接，可传给内容类工具继续取评论、字幕等。"""
+        """在 B 站按关键词搜索视频、找视频、检索投稿。
+
+        没有 BV 号或链接时用它入手：返回的每条都带链接，可直接传给内容类工具取评论、
+        字幕、弹幕等。
+        """
         page = _client().search(query=query, count=count, cursor=cursor)
         return SearchResult(
             count=len(page.items),

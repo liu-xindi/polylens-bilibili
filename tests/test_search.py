@@ -167,16 +167,18 @@ def test_empty_query_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.calls == []  # 不发请求
 
 
-def test_non_positive_count_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("bad", [0, -3])
+def test_non_positive_count_rejected(monkeypatch: pytest.MonkeyPatch, bad: int) -> None:
     client = _stub(monkeypatch, [_raw(1)])
-    _fetch(client, count=0)
-    assert client.calls[0]["page_size"] == 1
+    with pytest.raises(BilibiliError, match="正整数"):
+        _fetch(client, count=bad)
+    assert client.calls == []  # 不发请求
 
 
-def test_negative_cursor_normalized_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_negative_cursor_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _stub(monkeypatch, [_raw(1)])
-    _fetch(client, count=10, cursor="-5")
-    assert client.calls[0]["page"] == 1
+    with pytest.raises(BilibiliError, match="游标"):
+        _fetch(client, count=10, cursor="-5")
 
 
 def test_unparsable_cursor_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

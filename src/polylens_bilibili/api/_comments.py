@@ -9,9 +9,9 @@ import json
 import time
 from typing import Any
 
-from ..errors import AuthRequiredError, RateLimitedError
+from ..errors import AuthRequiredError, BilibiliError, RateLimitedError
 from ..models import Comment, Page, ReplyThread, to_local_time
-from ._constants import ENDPOINTS, REPLY_PAGE_SIZE
+from ._constants import ENDPOINTS, MAIN_PAGE_SIZE, REPLY_PAGE_SIZE
 from ._http import HttpClient, _RateLimited
 from ._signing import fetch_nav, sign_params
 
@@ -20,20 +20,49 @@ _REPLY_PAGE_DELAY = 0.15  # 楼中楼翻页间隔
 _AFTER_THREAD_DELAY = 0.2  # 每抓完一楼之后
 
 
+def _joined(values: list[str]) -> str | None:
+    return " ".join(values) or None
+
+
+def _image_urls(content: dict[str, Any]) -> str | None:
+    pictures = content.get("pictures") or []
+    return _joined([
+        str(p["img_src"]) for p in pictures if isinstance(p, dict) and p.get("img_src")
+    ])
+
+
+def _link_titles(content: dict[str, Any]) -> str | None:
+    """评论原文里只有裸链接，标题在同一份响应的 jump_url 里，不必另发请求。"""
+    jump_url = content.get("jump_url") or {}
+    if not isinstance(jump_url, dict):
+        return None
+    return _joined([
+        str(v["title"]) for v in jump_url.values() if isinstance(v, dict) and v.get("title")
+    ])
+
+
 def _normalize_reply(reply: dict[str, Any], *, root_id: int | None = None) -> Comment:
+    rpid = reply.get("rpid")
+    if not rpid:
+        # 这个 id 是 get_comment_replies 的入参，给空串会让钻取失败在更远的地方。
+        raise BilibiliError("评论数据缺少 rpid，无法定位这条评论")
     member = reply.get("member") or {}
     content_field = reply.get("content") or {}
     # parent 指向被回复的那条；等于本楼楼主（root_id）时置空：楼层嵌套已表达，只在"互回"时保留。
     parent = reply.get("parent")
     parent_id = str(parent) if parent and parent != root_id else None
     return Comment(
-        id=str(reply.get("rpid", "")),
+        id=str(rpid),
         author=member.get("uname", ""),
         content=content_field.get("message", ""),
         like_count=reply.get("like", 0),
         reply_count=reply.get("count", 0),
         parent_id=parent_id,
         created_at=to_local_time(reply.get("ctime")),
+        is_top=bool((reply.get("reply_control") or {}).get("is_up_top")),
+        up_liked=bool((reply.get("up_action") or {}).get("like")),
+        image_urls=_image_urls(content_field),
+        link_titles=_link_titles(content_field),
     )
 
 
@@ -77,9 +106,11 @@ def fetch_replies(
     内部串行（防风控）；中途触发风控则抛 RateLimitedError，不返回半程结果。
     楼中楼接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
     """
+    if limit < 1:
+        raise BilibiliError(f"limit 需为正整数，收到 {limit}")
     if not fetch_nav(client).is_login:
         raise AuthRequiredError("comment_replies")
-    count = max(1, limit)
+    count = limit
     start = int(cursor) if cursor else 0
     results: list[ReplyThread] = []
     try:
@@ -118,10 +149,12 @@ def fetch_comments(
 
     cursor=None 从头；count 为想要条数的下限（实际可能略多，整页对齐以保 cursor 续取不丢）。
     """
+    if count < 1:
+        raise BilibiliError(f"count 需为正整数，收到 {count}")
     nav = fetch_nav(client)
     if not nav.is_login:
         raise AuthRequiredError("comments")
-    want = max(1, count)
+    want = count
     comments: list[Comment] = []
     offset = cursor or ""
     has_more = False
@@ -140,6 +173,11 @@ def fetch_comments(
                     comments.append(_normalize_reply(raw))
             for raw in replies:
                 comments.append(_normalize_reply(raw))
+            if len(replies) < MAIN_PAGE_SIZE:
+                # 末页平台仍可能给出 is_end=false 与 next_offset：实测某视频共 15 条主评论，
+                # 首页给 14 条（另 1 条在 top_replies）却说没到底，下一页才空。照搬会让调用方
+                # 多发一次必然为空的请求。主评论每页固定 20 条，不满即到底。
+                break
             cur = data.get("cursor") or {}
             if cur.get("is_end"):
                 break  # 平台标记到底 → 抓全
