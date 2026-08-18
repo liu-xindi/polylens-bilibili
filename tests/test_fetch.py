@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import http.client
+import io
 import json
 import urllib.error
-from typing import cast
+from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from polylens_bilibili.api._comments import fetch_comments, fetch_replies
+from polylens_bilibili.api._constants import USER_AGENT
 from polylens_bilibili.api._danmaku import fetch_danmaku
 from polylens_bilibili.api._http import BilibiliHttpError, HttpClient, _RateLimited
 from polylens_bilibili.api._signing import NavInfo
@@ -538,15 +541,82 @@ def test_fetch_frame_without_ffmpeg_fails_fast(monkeypatch: pytest.MonkeyPatch) 
     from polylens_bilibili.api import _frame
 
     monkeypatch.setattr(_frame.shutil, "which", lambda _name: None)
-    calls: list[int] = []
-
-    class _Client:
-        def ensure_buvid(self) -> None:
-            calls.append(1)
-
+    client = MagicMock()
     with pytest.raises(BilibiliError, match="ffmpeg"):
-        _frame.fetch_frame(cast(HttpClient, _Client()), "BV1xx", 0, 1.0)
-    assert not calls  # 预检在任何网络动作之前
+        _frame.fetch_frame(cast(HttpClient, client), "BV1xx", 0, 1.0)
+    client.get_json.assert_not_called()  # 预检在任何网络动作之前
+
+
+def test_capture_frame_keeps_credentials_out_of_ffmpeg_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ffmpeg 只该看到本地代理地址。
+
+    改用 ffmpeg 自带的 -headers 也能跑通，但那会把 Cookie 放进命令行，而进程 argv 在
+    没挂 hidepid 的 Linux 上同机可读。本地代理存在的理由就是这个，这里把它钉住。
+    """
+    from polylens_bilibili.api import _frame
+
+    client = MagicMock()
+    client.combined_cookie.return_value = "SESSDATA=secret-value; bili_jct=token"
+    seen: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        seen.append(list(cmd))
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(_frame.subprocess, "run", _fake_run)
+    _frame._capture_frame(cast(HttpClient, client), "https://cdn.example/v.m4s", 1.0, "/tmp/x.jpg")
+
+    argv = " ".join(seen[0])
+    assert "secret-value" not in argv
+    assert "-headers" not in seen[0]
+    assert "http://127.0.0.1:" in argv
+
+
+def test_capture_frame_proxy_forwards_credentials_upstream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """凭据仍要送到 CDN，只是走代理的上游请求，不走命令行。"""
+    from polylens_bilibili.api import _frame
+
+    client = MagicMock()
+    client.combined_cookie.return_value = "SESSDATA=secret-value"
+    handler_cls: Any = _frame._make_proxy_handler(
+        cast(HttpClient, client), "https://cdn.example/v.m4s"
+    )
+    captured: dict[str, str] = {}
+
+    class _FakeResp:
+        status = 200
+        headers = {"Content-Type": "video/mp4"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, _n=None):
+            return b""
+
+    def _open(req, timeout=None):
+        captured.update(req.headers)
+        return _FakeResp()
+
+    client._opener.open = _open
+    handler = handler_cls.__new__(handler_cls)
+    handler.headers = {"Range": "bytes=0-"}
+    handler.wfile = io.BytesIO()
+    handler.send_response = lambda *a: None
+    handler.send_header = lambda *a: None
+    handler.end_headers = lambda: None
+    handler._proxy()
+
+    # urllib 会把 header 名规范成首字母大写
+    assert captured["Cookie"] == "SESSDATA=secret-value"
+    assert captured["Range"] == "bytes=0-"          # Range 透传，ffmpeg 才能按需取
+    assert captured["User-agent"] == USER_AGENT     # CDN 拒非浏览器 UA，缺它就是 403
 
 
 def test_fetch_frame_requires_login(monkeypatch: pytest.MonkeyPatch) -> None:

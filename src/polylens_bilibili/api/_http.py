@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import http.cookiejar
 import json
 import urllib.error
@@ -56,18 +55,6 @@ class HttpClient:
             response.read()
         self._bootstrap_cookie = "; ".join(f"{c.name}={c.value}" for c in self._jar)
 
-    def ensure_buvid(self) -> None:
-        """确保 _bootstrap_cookie 包含 buvid3（B站 SSR 需要它才嵌入播放信息）。"""
-        if self._bootstrap_cookie:
-            return
-        request = Request(WEB_HOME, headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        })
-        with self._opener.open(request, timeout=self.timeout) as response:
-            response.read()
-        self._bootstrap_cookie = "; ".join(f"{c.name}={c.value}" for c in self._jar)
-
     def combined_cookie(self) -> str:
         return "; ".join(c for c in [self.cookie, self._bootstrap_cookie] if c)
 
@@ -76,25 +63,6 @@ class HttpClient:
         request = Request(url, headers=self._headers(referer))
         with self._opener.open(request, timeout=self.timeout) as response:
             return response.read()
-
-    def get_html_page(self, url: str) -> bytes:
-        """请求 HTML 页面：确保 buvid cookie 存在，再用浏览器级 Accept header 抓取，自动解 gzip。"""
-        self.ensure_buvid()
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Referer": _DEFAULT_REFERER,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-            "Accept-Encoding": "gzip",
-        }
-        if cookie := self.combined_cookie():
-            headers["Cookie"] = cookie
-        request = Request(url, headers=headers)
-        with self._opener.open(request, timeout=self.timeout) as response:
-            raw = response.read()
-        if raw[:2] == b"\x1f\x8b":
-            raw = gzip.decompress(raw)
-        return raw
 
     def get_json(
         self,

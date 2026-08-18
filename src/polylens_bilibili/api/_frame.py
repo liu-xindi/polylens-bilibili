@@ -1,5 +1,11 @@
 """视频帧截取：本地 HTTP 代理透传 Cookie，ffmpeg 按需 Range 请求 CDN 截帧。
 
+代理的作用是让凭据留在进程内。ffmpeg 自带 -headers，用它同样能跑通，但那样 Cookie 会
+进入 ffmpeg 的命令行，而 Linux 上进程的 argv 对同机其他用户可读（除非 /proc 挂了
+hidepid），等于把 SESSDATA 暴露出去。代理让 ffmpeg 只看到 127.0.0.1 上的临时端口。
+CDN 直接拒掉非浏览器 User-Agent（ffmpeg 默认的 Lavf/… 收到 403），这一条与走不走代理
+无关，代理只是顺带把 UA 加上了；改成直连时要自己带 -user_agent，否则同样 403。
+
 未登录时平台只给到 480P 而不报错，与"这个视频只有 480P"无法区分，故取播放地址前判登录态。
 """
 
@@ -114,7 +120,10 @@ def _capture_frame(client: HttpClient, cdn_url: str, timestamp: float, output_pa
     server = _ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
     port = server.server_address[1]
 
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # poll_interval 同时决定 shutdown 要等多久：serve_forever 醒来才收得到停止信号，
+    # 用默认的 0.5 会在每次截帧末尾平均白等 0.12-0.15 秒。
+    threading.Thread(target=lambda: server.serve_forever(poll_interval=0.05),
+                     daemon=True).start()
     try:
         cmd = [
             "ffmpeg", "-y",
@@ -137,7 +146,6 @@ def fetch_frame(client: HttpClient, bvid: str, cid: int, timestamp: float) -> by
     """截取指定时刻的帧，返回内存中的 JPEG 字节。"""
     if shutil.which("ffmpeg") is None:
         raise BilibiliError("未检测到 ffmpeg：视频帧截取需要本机安装 ffmpeg 并加入 PATH")
-    client.ensure_buvid()
     data = _fetch_playurl(client, bvid, cid)
     streams = _list_streams(data)
     if not streams:
