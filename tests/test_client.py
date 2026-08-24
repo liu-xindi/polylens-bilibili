@@ -199,6 +199,46 @@ class _Resp:
         return None
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "https://b23.tv/abcdef",
+        "【标题】 https://b23.tv/abcdef",                       # App 分享按钮的默认格式
+        "【标题】 https://b23.tv/abcdef?share_source=copy_web",
+        "看这个 https://b23.tv/abcdef。后面还有中文",
+        "【a】https://bili2233.cn/abcdef 附言",
+    ],
+)
+def test_short_link_found_inside_share_text(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    """分享文案里链接前面有标题，不能把整段丢给 urlparse。"""
+    seen: dict[str, Any] = {}
+
+    def _fake(req, timeout=20):
+        seen["url"] = req.full_url
+        return _Resp(BV_URL)
+
+    monkeypatch.setattr(client_mod, "urlopen", _fake)
+    assert resolve_video(text) == ("BV1xx411c7mD", 1)
+    assert "。" not in seen["url"] and "附言" not in seen["url"]  # 中文没被吃进链接
+
+
+def test_short_link_error_names_the_link_not_the_whole_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from urllib.error import URLError
+
+    def _boom(req, timeout=20):
+        raise URLError("x")
+
+    monkeypatch.setattr(client_mod, "urlopen", _boom)
+    with pytest.raises(BilibiliError) as got:
+        resolve_video("【很长很长的标题】 https://b23.tv/abcdef")
+    assert "https://b23.tv/abcdef" in str(got.value)
+    assert "很长很长的标题" not in str(got.value)
+
+
 def test_short_link_carries_cookie(monkeypatch: pytest.MonkeyPatch) -> None:
     """短链走网页域名，平台对部分出口地址有风控，带登录 cookie 才放行。"""
     seen: dict[str, Any] = {}

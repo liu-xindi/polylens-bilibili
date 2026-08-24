@@ -39,21 +39,37 @@ from .models import (
 _BV_RE = re.compile(r"BV[0-9A-Za-z]+")
 _AV_RE = re.compile(r"\bav(\d+)\b", re.IGNORECASE)
 _PAGE_RE = re.compile(r"[?&]p=(\d+)")
+# 只收 RFC 3986 允许的字符：分享文案里链接后面常紧跟中文，按空格切会把它们吃进来
+_URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
 
-def _expand_short_link(url: str, cookie: str = "", timeout: int = 20) -> str:
-    """b23.tv 之类的短链展开成完整链接；不是短链则原样返回。
+def _find_short_link(text: str) -> str | None:
+    """从输入里找出短链。
+
+    输入常是 App 分享出来的整段文案，链接前面还有标题，直接把整段丢给 urlparse
+    取不到 netloc，短链就认不出来了。
+    """
+    for match in _URL_RE.finditer(text):
+        link = match.group(0).rstrip(".,;:!?")  # 句末标点不属于链接
+        if urlparse(link).netloc in SHORT_LINK_HOSTS:
+            return link
+    return None
+
+
+def _expand_short_link(text: str, cookie: str = "", timeout: int = 20) -> str:
+    """把输入里的 b23.tv 之类短链展开成完整链接；没有短链则原样返回。
 
     带上 cookie：短链走的是网页域名，平台对部分出口 IP 的网页域名有风控，
     同一台机器裸 UA 得 412、带登录 cookie 则正常跳转。匿名 cookie 不管用。
     """
-    if urlparse(url).netloc not in SHORT_LINK_HOSTS:
-        return url
+    link = _find_short_link(text)
+    if link is None:
+        return text
     headers = {"User-Agent": USER_AGENT}
     if cookie.strip():
         headers["Cookie"] = cookie.strip()
     try:
-        with urlopen(Request(url, headers=headers), timeout=timeout) as resp:  # noqa: S310
+        with urlopen(Request(link, headers=headers), timeout=timeout) as resp:  # noqa: S310
             return resp.geturl()
     except (HTTPError, URLError) as exc:
         hint = (
@@ -61,7 +77,7 @@ def _expand_short_link(url: str, cookie: str = "", timeout: int = 20) -> str:
             if cookie.strip()
             else "本服务的出口地址可能被平台限制；登录后重试，或改用完整视频链接（含 BV 号）。"
         )
-        raise BilibiliError(f"短链解析失败，无法展开 {url}；{hint}") from exc
+        raise BilibiliError(f"短链解析失败，无法展开 {link}；{hint}") from exc
 
 
 def _extract_video_id(text: str) -> str:
@@ -87,7 +103,7 @@ def resolve_video(url: str, page: int | None = None, cookie: str = "") -> tuple[
     """把输入解析成 (视频号, 分段序号)。
 
     分段序号取值顺序：显式传入 > 链接里的 ?p=N > 第 1 段。
-    cookie 只在输入是短链时用得上，展开短链要它才能过风控。
+    cookie 只在输入含短链时用得上，展开短链要它才能过风控。
     """
     if page is not None and page < 1:
         raise BilibiliError(f"page 需为正整数，收到 {page}")
