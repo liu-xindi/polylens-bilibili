@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 def to_local_time(ts: int | None) -> str | None:
@@ -72,15 +72,6 @@ def toon_table(name: str, rows: list[dict[str, Any]], columns: list[str]) -> str
     header = f"{name}[{len(rows)}]{{{','.join(columns)}}}:"
     lines = ["  " + ",".join(_toon_cell(r.get(c)) for c in columns) for r in rows]
     return "\n".join([header, *lines]) if lines else header
-
-
-def toon_columns(item_type: type) -> str:
-    """数据类的列名串。
-
-    供 outputSchema 的字段说明引用，与 to_toon 生成的表头取自同一处：
-    两边各写一份时，给数据类加字段会让说明悄悄过时。
-    """
-    return ",".join(f.name for f in fields(item_type))
 
 
 def to_toon(name: str, items: list[Any], item_type: type) -> str:
@@ -212,37 +203,29 @@ class Danmaku:
 
 
 class VideoInfo(BaseModel):
-    """视频元信息。字段恒在，无值为 null。"""
+    """视频元信息。字段恒在，无值为 null。
 
-    id: str = Field(description="BV 号")
-    title: str = Field(description="视频标题")
-    author: str | None = Field(default=None, description="UP 主昵称")
-    url: str | None = Field(default=None, description="视频链接")
-    published_at: str | None = Field(default=None, description="发布时间，本机时区")
-    summary: str | None = Field(default=None, description="简介正文")
-    duration_sec: float | None = Field(
-        default=None, description="时长秒数；多段视频为当前段的时长"
-    )
-    total_duration_sec: float | None = Field(
-        default=None,
-        description="整片时长秒数，多段视频为全部分段之和；单段视频与 duration_sec 相同",
-    )
-    view_count: int | None = Field(default=None, description="播放数")
-    danmaku_count_total: int | None = Field(
-        default=None,
-        description="弹幕数，多段视频为全部分段之和，不是当前段的数量",
-    )
-    comment_count: int | None = Field(default=None, description="评论数，含楼中楼")
-    like_count: int | None = Field(default=None, description="点赞数")
-    favorite_count: int | None = Field(default=None, description="收藏数")
-    share_count: int | None = Field(default=None, description="分享数")
-    coin_count: int | None = Field(default=None, description="投币数")
-    cover_url: str | None = Field(default=None, description="封面图地址")
-    part_count: int | None = Field(default=None, description="分段总数，单段视频为 1")
-    category_id: int | None = Field(default=None, description="分区 id")
-    current_page: int | None = Field(
-        default=None, description="当前是第几段，仅多段视频有值"
-    )
-    current_part: str | None = Field(
-        default=None, description="当前段的标题，仅多段视频有值"
-    )
+    这里不写字段说明：outputSchema 的字段描述不进模型上下文（2026-08-24 实测），
+    写在这里等于没写。需要模型知道的口径写在 server.py 的工具 description 里。
+    """
+
+    id: str
+    title: str
+    author: str | None = None
+    url: str | None = None
+    published_at: str | None = None
+    summary: str | None = None
+    duration_sec: float | None = None          # 多段视频为当前段
+    total_duration_sec: float | None = None    # 多段视频为全部分段之和
+    view_count: int | None = None
+    danmaku_count_total: int | None = None     # 多段视频为全部分段之和
+    comment_count: int | None = None           # 含楼中楼
+    like_count: int | None = None
+    favorite_count: int | None = None
+    share_count: int | None = None
+    coin_count: int | None = None
+    cover_url: str | None = None
+    part_count: int | None = None
+    category_id: int | None = None
+    current_page: int | None = None            # 仅多段视频有值
+    current_part: str | None = None            # 仅多段视频有值

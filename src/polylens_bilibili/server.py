@@ -1,7 +1,7 @@
 """MCP server：内容工具 + 搜索 + 登录工具。
 
-参数语义写在 Field(description=...) 里由 inputSchema 承载，返回字段写在各返回模型上
-由 outputSchema 承载，docstring 只说明工具做什么。
+模型能看到的只有三处：工具 docstring、inputSchema 的参数说明、server instructions。
+outputSchema 不进模型上下文，故返回模型只声明结构，字段口径写在 docstring 里。
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from .models import (
     VideoInfo,
     VideoPart,
     to_toon,
-    toon_columns,
 )
 
 # ── 参数说明 ────────────────────────────────────────────────────────────────
@@ -44,143 +43,93 @@ _PAGE_DESC = (
 _CURSOR_DESC = "续取游标：不传从头开始，回传上次返回的 next_cursor 取下一批。"
 
 # ── 返回模型 ────────────────────────────────────────────────────────────────
-
-_TOON_NOTE = (
-    "TOON 表格串：首行 表名[行数]{列名,…}: ，其后每行按列给值，空位表示该项无值。"
-)
+#
+# 这些模型只声明结构，不写字段说明。outputSchema 的字段描述不进模型上下文
+# （2026-08-24 用单标记三通道对照实测：description 与 inputSchema 的描述进，
+# outputSchema 的不进），写在这里等于没写。模型需要知道的口径写在工具的
+# description 与参数说明里；outputSchema 保留下来只作校验契约。
 
 
 class VideoInfoResult(VideoInfo):
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    elapsed_s: float | None = None
 
 
 class CommentsResult(BaseModel):
-    video_id: str = Field(description="解析出的视频号，可用于确认链接指向")
-    count: int = Field(description="本批返回的评论条数")
-    comments: str = Field(
-        description=(
-            f"{_TOON_NOTE} 列为 {toon_columns(Comment)}。"
-            "id 可传给 get_comment_replies 钻取楼中楼；content 为空时可能是纯表情或图片，"
-            "不代表这条评论没有内容。"
-        )
-    )
-    has_more: bool = Field(description="true 表示平台还有更多，false 表示已抓全")
-    next_cursor: str | None = Field(default=None, description="续取令牌，原样回传给 cursor")
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    video_id: str
+    count: int
+    comments: str
+    has_more: bool
+    next_cursor: str | None = None
+    elapsed_s: float | None = None
 
 
 class ReplyThreadItem(BaseModel):
-    comment_id: str = Field(description="所属主评论 id")
-    replies: str = Field(description=f"{_TOON_NOTE} 列与 get_comments 的 comments 相同。")
-    has_more: bool = Field(description="这个楼是否还有更多回复")
-    next_cursor: str | None = Field(default=None, description="这个楼的续取令牌")
-    withheld: int = Field(
-        default=0,
-        description=(
-            "这个楼里平台不肯给出的回复条数，翻到底也取不到。它们仍可能被返回的回复"
-            "用 parent_id 指到，那样的 parent_id 在结果里找不到对应行。"
-        ),
-    )
+    comment_id: str
+    replies: str
+    has_more: bool
+    next_cursor: str | None = None
+    withheld: int = 0
 
 
 class CommentRepliesResult(BaseModel):
-    video_id: str = Field(description="解析出的视频号")
-    results: list[ReplyThreadItem] = Field(
-        description=(
-            "每个楼一项，翻页状态在每项里各一份，本工具没有顶层的 has_more。"
-            "要继续翻，把还没到底的那些 comment_id 一并再传一次，cursor 用它们给出的 next_cursor。"
-        )
-    )
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    video_id: str
+    results: list[ReplyThreadItem]
+    elapsed_s: float | None = None
 
 
 class DanmakuResult(BaseModel):
-    video_id: str = Field(description="解析出的视频号")
-    count: int = Field(description="本次返回的弹幕条数")
-    danmaku: str = Field(
-        description=(
-            f"{_TOON_NOTE} 列为 {toon_columns(Danmaku)}。timestamp 是视频内秒数，"
-            "heat 是热度档位（约 1-10），数值越高越热门，同档内不再细分。"
-        )
-    )
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    video_id: str
+    count: int
+    danmaku: str
+    elapsed_s: float | None = None
 
 
 class SubtitlesResult(BaseModel):
-    video_id: str = Field(description="解析出的视频号")
-    count: int = Field(description="字幕条数")
-    lang: str | None = Field(
-        default=None, description="本次实际取的轨道语种；该段没有字幕时为 null"
-    )
-    available_langs: list[str] = Field(
-        default_factory=list,
-        description="该段可选的全部轨道语种，其中任一个都可以传给 lang 参数",
-    )
-    subtitles: str = Field(
-        description=(
-            f"{_TOON_NOTE} 列为 {toon_columns(SubtitleEntry)}，起止为视频内秒数，保留一位小数。"
-        )
-    )
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    video_id: str
+    count: int
+    lang: str | None = None
+    available_langs: list[str] = Field(default_factory=list)
+    subtitles: str
+    elapsed_s: float | None = None
 
 
 class PartsResult(BaseModel):
-    video_id: str = Field(description="解析出的视频号")
-    count: int = Field(description="分段总数")
-    parts: str = Field(
-        description=(
-            f"{_TOON_NOTE} 列为 {toon_columns(VideoPart)}。page 是分段序号，可传给内容类工具的 "
-            "page 参数；duration 为该段时长秒数。"
-        )
-    )
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    video_id: str
+    count: int
+    parts: str
+    elapsed_s: float | None = None
 
 
 class SearchResult(BaseModel):
-    count: int = Field(description="本批返回的条目数")
-    results: str = Field(
-        description=(
-            f"{_TOON_NOTE} 列为 {toon_columns(SearchItem)}。"
-            "url 可直接传给内容类工具；duration_sec 为时长秒数。"
-        )
-    )
-    has_more: bool = Field(description="true 表示还有更多结果")
-    next_cursor: str | None = Field(default=None, description="续取令牌，原样回传给 cursor")
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    count: int
+    results: str
+    has_more: bool
+    next_cursor: str | None = None
+    elapsed_s: float | None = None
 
 
 class FeedResult(BaseModel):
-    count: int = Field(description="本批返回的视频条数")
-    feed: str = Field(
-        description=(
-            f"{_TOON_NOTE} 列为 {toon_columns(FeedItem)}。"
-            "url 可直接传给内容类工具；duration_sec 为时长秒数；"
-            "rcmd_reason 是平台给的推荐理由，多数条目没有。"
-        )
-    )
-    elapsed_s: float | None = Field(default=None, description="服务端处理秒数")
+    count: int
+    feed: str
+    elapsed_s: float | None = None
 
 
 class LoginStateResult(BaseModel):
-    is_login: bool | None = Field(
-        description="true 已登录，false 未登录，null 表示无法验证（网络或平台异常）"
-    )
+    is_login: bool | None
 
 
 class CookieSavedResult(BaseModel):
-    message: str = Field(description="结果说明")
+    message: str
 
 
 class LogoutResult(BaseModel):
-    deleted: bool = Field(description="true 表示原本存有凭据并已删除")
-    message: str = Field(description="结果说明")
+    deleted: bool
+    message: str
 
 
 class QrCheckResult(BaseModel):
-    status: str = Field(
-        description="waiting 未扫码，scanned 已扫待手机确认，success 登录成功，expired 二维码过期"
-    )
-    message: str = Field(description="下一步该做什么")
+    status: str
+    message: str
 
 
 # ── 工具层辅助 ──────────────────────────────────────────────────────────────
@@ -298,7 +247,13 @@ def create_server(
         url: Annotated[str, Field(description=_URL_DESC)],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> VideoInfoResult:
-        """获取视频的标题、作者、发布时间、简介与各项统计。(video info, metadata, stats)"""
+        """获取视频的标题、作者、发布时间、简介与各项统计。
+
+        统计口径：评论数含楼中楼回复；弹幕数与整片时长是全部分段之和，
+        当前段时长只算这一段。
+
+        (video info, metadata, stats)
+        """
         video_id, part = _resolve(url, page)
         info = _client().get_video_info(video_id, part)
         return VideoInfoResult(**info.model_dump())
@@ -361,7 +316,14 @@ def create_server(
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentRepliesResult:
-        """按主评论 id 钻取楼中楼。需要登录。(comment replies, sub-replies, thread)"""
+        """按主评论 id 钻取楼中楼。需要登录。
+
+        翻页状态在每个楼里各一份，本工具没有顶层的 has_more 与 next_cursor。
+        withheld 是这个楼里平台不肯给出的回复条数，那些回复翻到底也取不到，
+        却仍可能被返回结果里的 parent_id 指到。
+
+        (comment replies, sub-replies, thread)
+        """
         video_id, _ = _resolve(url)
         threads = _client().get_comment_replies(
             video_id, comment_ids=comment_ids, limit=limit, cursor=cursor
@@ -390,7 +352,8 @@ def create_server(
                 description=(
                     "想要的弹幕条数。取该段里 heat 最高的这么多条，结果仍按时间轴排序；"
                     "达到或超过该段弹幕总数即返回全部。"
-                    "heat 是平台给每条弹幕的标记，弹幕没有点赞数，与评论的排序依据是两回事。"
+                    "heat 是平台给每条弹幕的标记，约 1-10 的档位，同档内不再细分；"
+                    "弹幕没有点赞数，与评论的排序依据是两回事。"
                 )
             ),
         ],
@@ -416,7 +379,7 @@ def create_server(
                 description=(
                     "轨道语种，如 zh-CN、en-US、ai-zh。不传则取平台给的第一条，"
                     "而各段的轨道构成可能不同，要跨段拿同一语种就显式指定。"
-                    "可选值见返回的 available_langs。"
+                    "可选值见返回的 available_langs；该段没有字幕时返回的 lang 为 null。"
                 )
             ),
         ] = None,
@@ -526,7 +489,12 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:
-        """查询当前是否已登录（联网核验本地凭据是否仍然有效）。(login status)"""
+        """查询当前是否已登录（联网核验本地凭据是否仍然有效）。
+
+        is_login 为 null 表示无法验证，与 false 不同。
+
+        (login status)
+        """
         return LoginStateResult(is_login=_client().get_login_status())
 
     @mcp.tool(annotations=_LOCAL_ONLY)
@@ -559,8 +527,8 @@ def create_server(
         session = BilibiliClient().start_qr_login()
         meta = {
             "key": session.key,
-            "message": "用 B站 App 扫描这张二维码，扫完并在手机上确认后调用 check_qr_login。",
-            "next_action": {"tool": "check_qr_login", "args": {"key": session.key}},
+            "message": "用 B站 App 扫描这张二维码，扫完并在手机上确认后调用 complete_qr_login。",
+            "next_action": {"tool": "complete_qr_login", "args": {"key": session.key}},
         }
         return [
             _png_block(_make_qr_png(session.url), "image/png"),
@@ -568,10 +536,16 @@ def create_server(
         ]
 
     @mcp.tool(annotations=_WRITES_CREDENTIAL)
-    def check_qr_login(
+    def complete_qr_login(
         key: Annotated[str, Field(description="start_qr_login 返回的 key。")],
     ) -> QrCheckResult:
-        """查询扫码结果。每次只查一次，成功时凭据自动写盘。(QR code login status)"""
+        """查询扫码结果，已确认则取回凭据并写入本地，登录即刻生效。
+
+        status 为 waiting 未扫码、scanned 已扫待手机确认、success 登录成功、
+        expired 二维码过期。每次只查一次。
+
+        (finish QR code login, poll QR status)
+        """
         result = BilibiliClient().check_qr_login(key)
         if result.status is QrStatus.SUCCESS:
             path = save_cookie(result.cookie)

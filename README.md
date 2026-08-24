@@ -22,7 +22,7 @@
 | `get_login_status` | 联网核验本地凭据是否仍然有效 | — |
 | `set_cookie` | 写入 Cookie，即时生效 | — |
 | `logout` | 删除本地 Cookie | — |
-| `start_qr_login` · `check_qr_login` | 扫码登录 | — |
+| `start_qr_login` · `complete_qr_login` | 扫码登录 | — |
 
 内容类工具的 `url` 参数接受视频链接、b23.tv 短链、裸 BV/av 号，以及含链接的分享文案。
 
@@ -103,7 +103,7 @@ uv run polylens-bilibili
 两种登录方式：
 
 - **手动 Cookie**：把从浏览器复制的整段 Cookie（单行）传给 `set_cookie`，即时生效，无需重启。远程或移动端也可在对话中设置。
-- **扫码**：调 `start_qr_login`，二维码作为图片直接返回在对话里，用 B站 App 扫码并在手机上确认后调 `check_qr_login`，凭据自动写入本地。
+- **扫码**：调 `start_qr_login`，二维码作为图片直接返回在对话里，用 B站 App 扫码并在手机上确认后调 `complete_qr_login`，凭据自动写入本地。
 
 凭据存于 `~/.cache/polylens-bilibili/cookie`，`logout` 可删除。
 

@@ -27,14 +27,13 @@ from polylens_bilibili.models import (
     SubtitleEntry,
     VideoInfo,
     VideoPart,
-    toon_columns,
 )
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 _TOOL_NAMES = {
     "get_video_info", "get_parts", "get_comments", "get_comment_replies", "get_danmaku",
     "get_subtitles", "get_frame", "search_videos", "get_feed",
-    "get_login_status", "set_cookie", "logout", "start_qr_login", "check_qr_login",
+    "get_login_status", "set_cookie", "logout", "start_qr_login", "complete_qr_login",
 }
 
 
@@ -107,7 +106,7 @@ def test_tools_declare_read_and_world_hints() -> None:
     assert ann["set_cookie"].readOnlyHint is False
     assert ann["set_cookie"].openWorldHint is False
     assert ann["logout"].openWorldHint is False
-    assert ann["check_qr_login"].readOnlyHint is False
+    assert ann["complete_qr_login"].readOnlyHint is False
 
 
 def test_instructions_state_scope_and_login_requirement() -> None:
@@ -179,24 +178,48 @@ def test_get_comments_omits_next_cursor_at_end() -> None:
     assert payload["comments"].startswith("comments[0]{")
 
 
-_TOON_FIELDS = [
-    (server_mod.CommentsResult, "comments", Comment),
-    (server_mod.DanmakuResult, "danmaku", Danmaku),
-    (server_mod.SubtitlesResult, "subtitles", SubtitleEntry),
-    (server_mod.PartsResult, "parts", VideoPart),
-    (server_mod.SearchResult, "results", SearchItem),
-    (server_mod.FeedResult, "feed", FeedItem),
-]
+async def _tool_map():
+    server = create_server_for_test()
+    async with create_connected_server_and_client_session(server._mcp_server) as client:
+        await client.initialize()
+        return {t.name: t for t in (await client.list_tools()).tools}
 
 
-@pytest.mark.parametrize(("model", "field", "item_type"), _TOON_FIELDS)
-def test_declared_columns_match_the_actual_header(model, field, item_type) -> None:
-    """字段说明里的列必须与 TOON 表头逐字一致。
+@pytest.mark.parametrize(
+    ("tool", "phrase"),
+    [
+        ("get_video_info", "含楼中楼"),          # comment_count 的口径
+        ("get_video_info", "全部分段之和"),      # danmaku_count_total / total_duration_sec
+        ("get_comment_replies", "withheld"),
+        ("get_comment_replies", "没有顶层"),     # 与全局翻页规则相反，别处不覆盖
+        ("get_login_status", "null"),            # 三态区分
+        ("complete_qr_login", "expired"),        # 状态取值
+    ],
+)
+def test_field_semantics_live_in_the_visible_channel(tool: str, phrase: str) -> None:
+    """字段口径必须写在 description 里。
 
-    两边曾各写一份，给数据类加字段后说明少了四列，模型据此读表就会错位。
+    outputSchema 的字段描述不进模型上下文（实测），写在返回模型上等于没写。
     """
-    described = model.model_fields[field].description
-    assert f"列为 {toon_columns(item_type)}" in described
+    tools = _run(_tool_map)
+    assert phrase in (tools[tool].description or "")
+
+
+def test_return_models_carry_no_field_descriptions() -> None:
+    """outputSchema 只作校验契约，不再当说明通道用，免得又写进看不见的地方。"""
+    def described_paths(node: Any, path: str) -> list[str]:
+        if isinstance(node, dict):
+            here = [path] if isinstance(node.get("description"), str) else []
+            return here + [
+                q for k, v in node.items() for q in described_paths(v, f"{path}.{k}")
+            ]
+        if isinstance(node, list):
+            return [q for v in node for q in described_paths(v, path)]
+        return []
+
+    tools = _run(_tool_map)
+    found = [q for name, t in tools.items() for q in described_paths(t.outputSchema or {}, name)]
+    assert found == []
 
 
 def test_get_comment_replies_groups_by_thread() -> None:
@@ -326,7 +349,7 @@ def test_start_qr_login_returns_inline_qr_image() -> None:
     assert result.content[0].data  # base64 PNG
     meta = json.loads(result.content[-1].text)
     assert meta["key"] == "k1"
-    assert meta["next_action"] == {"tool": "check_qr_login", "args": {"key": "k1"}}
+    assert meta["next_action"] == {"tool": "complete_qr_login", "args": {"key": "k1"}}
 
 
 # ── 登录类工具 ──────────────────────────────────────────────────────────────
@@ -366,12 +389,12 @@ def test_logout_reports_whether_credential_existed(
     assert not path.exists()
 
 
-def test_check_qr_login_success_saves_cookie(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_complete_qr_login_success_saves_cookie(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "cookie"
     monkeypatch.setattr("polylens_bilibili.credentials.cookie_file_path", lambda: path)
     result = LoginCheckResult(status=QrStatus.SUCCESS, cookie="SESSDATA=ok")
     with patch.object(server_mod.BilibiliClient, "check_qr_login", lambda self, key: result):
-        payload = _payload("check_qr_login", {"key": "k1"})
+        payload = _payload("complete_qr_login", {"key": "k1"})
     assert payload["status"] == "success"
     assert path.read_text() == "SESSDATA=ok"
 
@@ -384,12 +407,12 @@ def test_check_qr_login_success_saves_cookie(tmp_path, monkeypatch: pytest.Monke
         (QrStatus.EXPIRED, "已过期"),
     ],
 )
-def test_check_qr_login_pending_states_tell_next_step(
+def test_complete_qr_login_pending_states_tell_next_step(
     status: QrStatus, hint: str
 ) -> None:
     result = LoginCheckResult(status=status)
     with patch.object(server_mod.BilibiliClient, "check_qr_login", lambda self, key: result):
-        payload = _payload("check_qr_login", {"key": "k1"})
+        payload = _payload("complete_qr_login", {"key": "k1"})
     assert payload["status"] == status.value
     assert hint in payload["message"]
 
