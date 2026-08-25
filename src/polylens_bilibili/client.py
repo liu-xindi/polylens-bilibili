@@ -108,8 +108,11 @@ def resolve_video(url: str, page: int | None = None, cookie: str = "") -> tuple[
     if page is not None and page < 1:
         raise BilibiliError(f"page 需为正整数，收到 {page}")
     expanded = _expand_short_link(url, cookie)
+    # 先看用户写的那个 ?p=：短链跳转不转发 query，而跳转目标自带 p=1，只看展开后的
+    # 链接会把用户写的段号盖成 1，且无声无息。分段分享出来的短链本身不带 ?p=，
+    # 段号在展开后的链接里，走后一半。
     # 链接自带的 ?p=0 由 _extract_page 归入"没写"，不为它报错：这样的链接在网页上照样能打开。
-    chosen = page if page is not None else _extract_page(expanded)
+    chosen = page if page is not None else (_extract_page(url) or _extract_page(expanded))
     return _extract_video_id(expanded), chosen or 1
 
 
@@ -184,7 +187,8 @@ class BilibiliClient:
         bvid = str(view.get("bvid") or video_id)
         cid = cid_for_page(view, page)
         duration = clip_duration(view, cid)
-        if duration is not None and at > duration:
+        # 时间轴是 [0, duration)，等于时长那一刻没有帧，与超出时长同样处理
+        if duration is not None and at >= duration:
             raise BilibiliError(f"请求的时间 {at:g} 秒超出视频时长（约 {duration:g} 秒）")
         return fetch_frame(self._http, bvid, cid, at)
 

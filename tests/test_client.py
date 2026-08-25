@@ -173,6 +173,18 @@ def test_get_frame_rejects_timestamp_beyond_duration(monkeypatch: pytest.MonkeyP
         BilibiliClient().get_frame("BV1xx", timestamp=99.0)
 
 
+def test_get_frame_rejects_timestamp_equal_to_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """时间轴是 [0, duration)，等于时长那一刻没有帧。
+
+    放过去的话 ffmpeg 会失败，报出来的形状与其他参数边界不一致。
+    """
+    monkeypatch.setattr(BilibiliClient, "_view", lambda self, vid: _view_stub(duration=30.0))
+    with pytest.raises(BilibiliError, match="超出视频时长"):
+        BilibiliClient().get_frame("BV1xx", timestamp=30.0)
+
+
 def test_get_frame_allows_timestamp_when_duration_unknown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -222,6 +234,35 @@ def test_short_link_found_inside_share_text(
     monkeypatch.setattr(client_mod, "urlopen", _fake)
     assert resolve_video(text) == ("BV1xx411c7mD", 1)
     assert "。" not in seen["url"] and "附言" not in seen["url"]  # 中文没被吃进链接
+
+
+def test_short_link_keeps_the_page_written_by_the_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """短链跳转不转发 query，跳转目标还自带 p=1，只看展开后的链接会把段号盖成 1。"""
+    monkeypatch.setattr(
+        client_mod, "urlopen",
+        lambda req, timeout=20: _Resp(BV_URL + "?share_source=copy&p=1&spmid=x"),
+    )
+    assert resolve_video("https://b23.tv/abcdef?p=150") == ("BV1xx411c7mD", 150)
+    assert resolve_video("【标题】 https://b23.tv/abcdef?p=150") == ("BV1xx411c7mD", 150)
+
+
+def test_short_link_falls_back_to_page_in_expanded_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """分段分享出来的短链自己不带 ?p=，段号在展开后的链接里。"""
+    monkeypatch.setattr(
+        client_mod, "urlopen", lambda req, timeout=20: _Resp(BV_URL + "?p=7&share_source=copy")
+    )
+    assert resolve_video("https://b23.tv/abcdef") == ("BV1xx411c7mD", 7)
+
+
+def test_explicit_page_still_wins_over_both(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        client_mod, "urlopen", lambda req, timeout=20: _Resp(BV_URL + "?p=1")
+    )
+    assert resolve_video("https://b23.tv/abcdef?p=150", page=3) == ("BV1xx411c7mD", 3)
 
 
 def test_short_link_error_names_the_link_not_the_whole_text(

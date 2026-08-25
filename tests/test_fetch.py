@@ -619,6 +619,34 @@ def test_capture_frame_proxy_forwards_credentials_upstream(
     assert captured["User-agent"] == USER_AGENT     # CDN 拒非浏览器 UA，缺它就是 403
 
 
+def test_fetch_frame_ffmpeg_failure_is_a_bilibili_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """候选地址全失败时给可读错误，不把 ffmpeg 的 stderr 交给调用方。
+
+    末尾附近最容易命中：末个关键帧之后取不到画面，失败区间宽度随视频而变。
+    """
+    from polylens_bilibili.api import _frame
+
+    monkeypatch.setattr(_frame.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        _frame, "_fetch_playurl",
+        lambda client, bvid, cid: {"dash": {"video": [
+            {"id": 64, "codecs": "avc1", "baseUrl": "https://cdn/a", "backupUrl": ["https://cdn/b"]}
+        ]}},
+    )
+
+    def _boom(client, url, ts, out):
+        raise RuntimeError("ffmpeg 失败:\nError sending frames to consumers: Invalid argument")
+
+    monkeypatch.setattr(_frame, "_capture_frame", _boom)
+    with pytest.raises(BilibiliError) as got:
+        _frame.fetch_frame(MagicMock(), "BV1xx", 200, 214.9)
+    assert "214.9" in str(got.value)
+    assert "ffmpeg" not in str(got.value)
+    assert "Invalid argument" not in str(got.value)
+
+
 def test_fetch_frame_requires_login(monkeypatch: pytest.MonkeyPatch) -> None:
     """未登录时平台只给到 480P 而不报错，故取播放地址前先判登录态。"""
     from polylens_bilibili.api import _frame

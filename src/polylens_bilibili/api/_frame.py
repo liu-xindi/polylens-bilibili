@@ -170,6 +170,12 @@ def fetch_frame(client: HttpClient, bvid: str, cid: int, timestamp: float) -> by
                 return output_path.read_bytes()
             except (RuntimeError, OSError) as exc:
                 last_err = exc
-        raise last_err
+        # 全部候选地址都失败。原样上抛会把 ffmpeg 的 stderr 交给调用方，那是内部细节；
+        # 且它不是 BilibiliError，工具层接不住，报出来的形状与其他参数边界不一致。
+        # 末尾附近最容易命中：末个关键帧之后取不到画面，失败区间宽度随视频而变。
+        raise BilibiliError(
+            f"截取第 {timestamp:g} 秒的帧失败，该时刻附近可能没有可解码的画面；"
+            f"改用更靠前的时间点重试。"
+        ) from last_err
     finally:
         output_path.unlink(missing_ok=True)  # ffmpeg 产物读入内存后删
