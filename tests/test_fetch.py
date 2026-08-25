@@ -14,7 +14,7 @@ import pytest
 
 from polylens_bilibili.api._comments import fetch_comments, fetch_replies
 from polylens_bilibili.api._constants import USER_AGENT
-from polylens_bilibili.api._danmaku import fetch_danmaku
+from polylens_bilibili.api._danmaku import fetch_danmaku, top_by_heat
 from polylens_bilibili.api._http import BilibiliHttpError, HttpClient, _RateLimited
 from polylens_bilibili.api._signing import NavInfo
 from polylens_bilibili.api._subtitles import fetch_subtitles
@@ -434,6 +434,54 @@ def test_fetch_danmaku_url_includes_cid():
     client.get_bytes.return_value = b"<i></i>"
     fetch_danmaku(client, cid=9999)
     assert "oid=9999" in client.get_bytes.call_args[0][0]
+
+
+# ── 弹幕取样 ────────────────────────────────────────────────────────────────
+
+
+def _dm(ts: float, heat: int):
+    from polylens_bilibili.models import Danmaku
+
+    return Danmaku(content=f"d{ts:g}", timestamp=ts, heat=heat)
+
+
+def test_top_by_heat_spreads_over_time_within_one_tier() -> None:
+    """heat 只有十档且每档条数相等，小 count 会整批落在最高档。
+
+    同档之间无从比较，取最早的几条会让长视频的取样全挤在开头。
+    """
+    pool = [_dm(float(i), 10) for i in range(100)]
+    got = top_by_heat(pool, 5)
+    stamps = [b.timestamp for b in got]
+    assert stamps == sorted(stamps)
+    assert stamps[0] == 0.0 and stamps[-1] == 99.0  # 首尾都取到
+    gaps = [b - a for a, b in zip(stamps, stamps[1:], strict=False)]
+    assert max(gaps) - min(gaps) <= 1  # 间隔基本均匀
+
+
+def test_top_by_heat_prefers_higher_tiers_before_spreading() -> None:
+    """先取满整档，不满的那一档才等距挑。"""
+    pool = [_dm(float(i), 10) for i in range(3)] + [_dm(float(10 + i), 5) for i in range(20)]
+    got = top_by_heat(pool, 6)
+    assert sum(1 for b in got if b.heat == 10) == 3  # 高档全要
+    assert sum(1 for b in got if b.heat == 5) == 3
+
+
+def test_top_by_heat_is_reproducible() -> None:
+    """同一输入两次调用结果相同：随机抽样会破坏这一点。"""
+    pool = [_dm(float(i), 10) for i in range(50)]
+    assert [b.timestamp for b in top_by_heat(pool, 7)] == [
+        b.timestamp for b in top_by_heat(pool, 7)
+    ]
+
+
+@pytest.mark.parametrize("count", [1, 2, 7, 50, 51, 200])
+def test_top_by_heat_shape_holds(count: int) -> None:
+    pool = [_dm(float(i), (i % 10) + 1) for i in range(50)]
+    got = top_by_heat(pool, count)
+    assert len(got) == min(count, len(pool))
+    assert len({id(b) for b in got}) == len(got)                       # 无重复
+    assert [b.timestamp for b in got] == sorted(b.timestamp for b in got)
 
 
 # ── HttpClient 的风控判定 ───────────────────────────────────────────────────
