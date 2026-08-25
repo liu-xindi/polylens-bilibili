@@ -187,8 +187,13 @@ class BilibiliClient:
         bvid = str(view.get("bvid") or video_id)
         cid = cid_for_page(view, page)
         duration = clip_duration(view, cid)
-        # 时间轴是 [0, duration)，等于时长那一刻没有帧，与超出时长同样处理
-        if duration is not None and at >= duration:
+        # 时间轴是 [0, duration)：等于时长那一刻没有帧，与超出时长同样拦下，但分开措辞——
+        # 用「超出」说相等，同一个数字既是超出的又是被超出的，读着像 bug。
+        if duration is not None and at == duration:
+            raise BilibiliError(
+                f"请求的时间 {at:g} 秒等于视频时长，最后一刻没有画面；改用更小的值。"
+            )
+        if duration is not None and at > duration:
             raise BilibiliError(f"请求的时间 {at:g} 秒超出视频时长（约 {duration:g} 秒）")
         return fetch_frame(self._http, bvid, cid, at)
 

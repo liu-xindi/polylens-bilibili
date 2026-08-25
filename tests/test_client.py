@@ -181,8 +181,9 @@ def test_get_frame_rejects_timestamp_equal_to_duration(
     放过去的话 ffmpeg 会失败，报出来的形状与其他参数边界不一致。
     """
     monkeypatch.setattr(BilibiliClient, "_view", lambda self, vid: _view_stub(duration=30.0))
-    with pytest.raises(BilibiliError, match="超出视频时长"):
+    with pytest.raises(BilibiliError, match="等于视频时长") as got:
         BilibiliClient().get_frame("BV1xx", timestamp=30.0)
+    assert "超出" not in str(got.value)  # 同一个数字既超出又被超出，读着像 bug
 
 
 def test_get_frame_allows_timestamp_when_duration_unknown(
