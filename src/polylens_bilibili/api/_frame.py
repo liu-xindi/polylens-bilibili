@@ -136,8 +136,15 @@ def _capture_frame(client: HttpClient, cdn_url: str, timestamp: float, output_pa
         blocked = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}
         env = {k: v for k, v in os.environ.items() if k.upper() not in blocked}
         result = subprocess.run(cmd, capture_output=True, timeout=120, env=env)  # noqa: S603
+        stderr = result.stderr.decode(errors="replace")[-800:]
         if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg 失败:\n{result.stderr.decode(errors='replace')[-800:]}")
+            raise RuntimeError(f"ffmpeg 失败:\n{stderr}")
+        # 退出码 0 不代表出了图。ffmpeg 6.1 在目标时刻取不到画面时照样返回 0，只在 stderr
+        # 里写一句 "Output file is empty, nothing was encoded"，产物是空文件或根本没建；
+        # ffmpeg 8 同样情况返回非零。不查产物就会把空字节当成截帧结果一路交到调用方，
+        # 拼成一个 data 为空的图片块。
+        if not Path(output_path).is_file() or Path(output_path).stat().st_size == 0:
+            raise RuntimeError(f"ffmpeg 退出码为 0 但没有产出画面:\n{stderr}")
     finally:
         server.shutdown()
 

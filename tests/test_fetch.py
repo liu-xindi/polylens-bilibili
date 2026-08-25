@@ -548,7 +548,7 @@ def test_fetch_frame_without_ffmpeg_fails_fast(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_capture_frame_keeps_credentials_out_of_ffmpeg_argv(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     """ffmpeg 只该看到本地代理地址。
 
@@ -561,12 +561,15 @@ def test_capture_frame_keeps_credentials_out_of_ffmpeg_argv(
     client.combined_cookie.return_value = "SESSDATA=secret-value; bili_jct=token"
     seen: list[list[str]] = []
 
+    out = tmp_path / "f.jpg"
+
     def _fake_run(cmd, **kwargs):
         seen.append(list(cmd))
+        out.write_bytes(b"\xff\xd8jpeg")  # 出图了，产物检查才放行
         return SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(_frame.subprocess, "run", _fake_run)
-    _frame._capture_frame(cast(HttpClient, client), "https://cdn.example/v.m4s", 1.0, "/tmp/x.jpg")
+    _frame._capture_frame(cast(HttpClient, client), "https://cdn.example/v.m4s", 1.0, str(out))
 
     argv = " ".join(seen[0])
     assert "secret-value" not in argv
@@ -617,6 +620,60 @@ def test_capture_frame_proxy_forwards_credentials_upstream(
     assert captured["Cookie"] == "SESSDATA=secret-value"
     assert captured["Range"] == "bytes=0-"          # Range 透传，ffmpeg 才能按需取
     assert captured["User-agent"] == USER_AGENT     # CDN 拒非浏览器 UA，缺它就是 403
+
+
+@pytest.mark.parametrize("make_output", [False, True])
+def test_capture_frame_rejects_empty_output_despite_zero_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, make_output: bool
+) -> None:
+    """ffmpeg 退出码为 0 不代表出了图。
+
+    实测 ffmpeg 6.1 在目标时刻取不到画面时返回 0，只在 stderr 写一句
+    "Output file is empty, nothing was encoded"，产物是空文件或根本没建。
+    不查产物就会把空字节当成截帧结果，最终拼成一个 data 为空的图片块。
+    """
+    from polylens_bilibili.api import _frame
+
+    out = tmp_path / "f.jpg"
+    if make_output:
+        out.write_bytes(b"")  # NamedTemporaryFile 留下的空占位
+
+    def _fake_run(cmd, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stderr=b"[out#0/image2] Output file is empty, nothing was encoded",
+        )
+
+    monkeypatch.setattr(_frame.subprocess, "run", _fake_run)
+    client = MagicMock()
+    client.combined_cookie.return_value = ""
+    with pytest.raises(RuntimeError, match="没有产出画面"):
+        _frame._capture_frame(cast(HttpClient, client), "https://cdn/a", 1.0, str(out))
+
+
+def test_fetch_frame_never_returns_empty_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """产物为空时要落到候选重试与统一报错上，不能把空字节交出去。"""
+    from polylens_bilibili.api import _frame
+
+    monkeypatch.setattr(_frame.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        _frame, "_fetch_playurl",
+        lambda client, bvid, cid: {"dash": {"video": [
+            {"id": 64, "codecs": "avc1", "baseUrl": "https://cdn/a", "backupUrl": ["https://cdn/b"]}
+        ]}},
+    )
+    tried: list[str] = []
+
+    def _empty(client, url, ts, out):
+        tried.append(url)
+        raise RuntimeError("ffmpeg 退出码为 0 但没有产出画面")
+
+    monkeypatch.setattr(_frame, "_capture_frame", _empty)
+    with pytest.raises(BilibiliError, match="没有可解码的画面"):
+        _frame.fetch_frame(MagicMock(), "BV1xx", 200, 214.9)
+    assert tried == ["https://cdn/a", "https://cdn/b"]  # 备用地址也试过
 
 
 def test_fetch_frame_ffmpeg_failure_is_a_bilibili_error(
