@@ -41,7 +41,7 @@ def _pin_timezone():
 def _view(**kw):
     base = {
         "aid": 100, "bvid": "BV1xx", "cid": 200,
-        "title": "test title", "owner": {"name": "up主"},
+        "title": "test title", "owner": {"name": "up主", "mid": 42},
         "pubdate": 1700000000, "stat": {}, "desc": "",
     }
     base.update(kw)
@@ -53,6 +53,7 @@ def test_build_video_info_basic_fields():
     info, aid, cid = build_video_info(view)
     assert info.title == "test title"
     assert info.author == "up主"
+    assert info.author_url == "https://space.bilibili.com/42"
     assert info.id == "BV1xx"
     assert aid == 100
     assert cid == 200

@@ -20,6 +20,7 @@ from .api._http import HttpClient, _RateLimited
 from .api._login import check_qr_login, start_qr_login
 from .api._search import fetch_search
 from .api._signing import fetch_nav
+from .api._space import fetch_up_videos
 from .api._subtitles import SubtitleTrack, fetch_subtitles
 from .api._suggest import fetch_suggest
 from .api._video import build_video_info, cid_for_page, clip_duration, fetch_view, list_parts
@@ -33,6 +34,7 @@ from .models import (
     QrLoginSession,
     ReplyThread,
     SearchItem,
+    UpVideoItem,
     VideoInfo,
     VideoPart,
 )
@@ -40,6 +42,7 @@ from .models import (
 _BV_RE = re.compile(r"BV[0-9A-Za-z]+")
 _AV_RE = re.compile(r"\bav(\d+)\b", re.IGNORECASE)
 _PAGE_RE = re.compile(r"[?&]p=(\d+)")
+_SPACE_RE = re.compile(r"space\.bilibili\.com/(\d+)")
 # 只收 RFC 3986 允许的字符：分享文案里链接后面常紧跟中文，按空格切会把它们吃进来
 _URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
@@ -98,6 +101,16 @@ def _extract_page(text: str) -> int | None:
         return None
     value = int(m.group(1))
     return value if value >= 1 else None
+
+
+def resolve_up(text: str) -> int:
+    """从空间链接或裸 mid 取出 UP 主 mid。"""
+    text = text.strip()
+    if match := _SPACE_RE.search(text):
+        return int(match.group(1))
+    if text.isdigit():
+        return int(text)
+    raise BilibiliError(f"无法识别的 UP 主：{text}；传空间链接或数字 mid")
 
 
 def resolve_video(url: str, page: int | None = None, cookie: str = "") -> tuple[str, int]:
@@ -205,6 +218,16 @@ class BilibiliClient:
 
     def suggest(self, term: str) -> list[str]:
         return fetch_suggest(self._http, term)
+
+    def get_up_videos(
+        self,
+        mid: int,
+        *,
+        cursor: str | None = None,
+        order: str = "newest",
+        keyword: str | None = None,
+    ) -> tuple[str | None, Page[UpVideoItem]]:
+        return fetch_up_videos(self._http, mid, cursor=cursor, order=order, keyword=keyword)
 
     def get_feed(self, *, count: int) -> list[FeedItem]:
         return fetch_feed(self._http, count=count)

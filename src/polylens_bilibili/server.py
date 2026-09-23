@@ -19,7 +19,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from .client import BilibiliClient, resolve_video
+from .client import BilibiliClient, resolve_up, resolve_video
 from .credentials import delete_cookie, load_cookie, save_cookie
 from .models import (
     Comment,
@@ -28,6 +28,7 @@ from .models import (
     QrStatus,
     SearchItem,
     SubtitleEntry,
+    UpVideoItem,
     VideoInfo,
     VideoPart,
     to_toon,
@@ -113,6 +114,16 @@ class SuggestResult(BaseModel):
     elapsed_s: float | None = None
 
 
+class UpVideosResult(BaseModel):
+    author: str | None
+    author_url: str
+    count: int
+    videos: str
+    has_more: bool
+    next_cursor: str | None = None
+    elapsed_s: float | None = None
+
+
 class FeedResult(BaseModel):
     count: int
     feed: str
@@ -186,7 +197,7 @@ def _make_qr_png(url: str) -> bytes:
 
 _SERVER_INSTRUCTIONS = (
     "本服务从 B 站视频中读取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
-    "并支持按关键词搜索视频、给出搜索联想词、刷首页推荐。"
+    "并支持按关键词搜索视频、给出搜索联想词、刷首页推荐、列出 UP 主的投稿。"
 )
 
 _STATUS_MSG = {
@@ -238,6 +249,8 @@ def create_server(
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> VideoInfoResult:
         """获取视频的标题、作者、发布时间、简介与各项统计。
+
+        author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
 
         统计口径：评论数含楼中楼回复；弹幕数与整片时长是全部分段之和，
         当前段时长只算这一段。
@@ -439,7 +452,7 @@ def create_server(
         """按关键词搜索 B 站视频。
 
         返回的每条都带链接，可直接传给内容类工具取评论、
-        字幕、弹幕等。
+        字幕、弹幕等；author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
 
         (search videos, find video by keyword)
         """
@@ -458,12 +471,44 @@ def create_server(
     ) -> SuggestResult:
         """给出 B 站搜索框的联想建议词，最多 10 条，没有建议时返回空表。
 
-        平台联想时会忽略 + # 等符号，C++ 与 C 得到的建议相同。
+        平台联想时会忽略 + # 等符号。
 
         (search suggestions, autocomplete, related keywords)
         """
         suggestions = _client().suggest(term)
         return SuggestResult(count=len(suggestions), suggestions=suggestions)
+
+    @mcp.tool(annotations=_READS_PLATFORM)
+    @_timed
+    def list_up_videos(
+        author_url: Annotated[
+            str, Field(description="UP 主空间链接（其他工具返回的 author_url），或数字 mid。")
+        ],
+        cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
+        order: Annotated[
+            Literal["newest", "most_viewed", "most_favorited"],
+            Field(description="排序：最新发布、最多播放、最多收藏。"),
+        ] = "newest",
+        keyword: Annotated[
+            str | None, Field(description="只看标题含此关键词的投稿。不传则不筛选。")
+        ] = None,
+    ) -> UpVideosResult:
+        """列出 UP 主的投稿视频，每批 40 条，可翻页。
+
+        返回的每条都带链接，可直接传给内容类工具。
+
+        (uploader videos, channel uploads, other videos by this author)
+        """
+        mid = resolve_up(author_url)
+        author, page = _client().get_up_videos(mid, cursor=cursor, order=order, keyword=keyword)
+        return UpVideosResult(
+            author=author,
+            author_url=f"https://space.bilibili.com/{mid}",
+            count=len(page.items),
+            videos=to_toon("videos", page.items, UpVideoItem),
+            has_more=page.has_more,
+            next_cursor=page.next_cursor,
+        )
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
@@ -480,6 +525,7 @@ def create_server(
         """刷 B 站首页推荐流。
 
         登录后按账号口味推，未登录给通用推荐。
+        author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
 
         (homepage feed, recommendations, browse)
         """

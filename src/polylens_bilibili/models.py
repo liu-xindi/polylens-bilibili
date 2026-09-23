@@ -14,6 +14,11 @@ from typing import Any
 from pydantic import BaseModel
 
 
+def space_url(mid: Any) -> str | None:
+    """UP 主 mid → 空间链接；没有 mid 就没有链接。"""
+    return f"https://space.bilibili.com/{mid}" if mid else None
+
+
 def to_local_time(ts: int | None) -> str | None:
     """epoch 秒 → 本机时区的可读时间；0 与 None 同视为无时间戳，返回 None。
 
@@ -152,6 +157,7 @@ class SearchItem:
     title: str
     url: str
     author: str | None
+    author_url: str | None  # UP 主空间链接，可传给 list_up_videos
     published_at: str | None  # 本机时区可读时间
     duration_sec: float | None  # 时长秒数（平台给的是"总分钟:秒"文本，已换算）
     view_count: int | None
@@ -165,10 +171,24 @@ class FeedItem:
     title: str
     url: str
     author: str | None
+    author_url: str | None  # UP 主空间链接
     published_at: str | None  # 本机时区可读时间
     duration_sec: float | None  # 时长秒数
     view_count: int | None
     rcmd_reason: str | None  # 平台给的推荐理由，多数条目没有
+
+
+@dataclass(slots=True)
+class UpVideoItem:
+    """UP 主投稿列表的一条。url 可直接传给内容类工具。"""
+
+    title: str
+    url: str
+    published_at: str | None  # 本机时区可读时间
+    duration_sec: float | None  # 时长秒数
+    view_count: int | None
+    danmaku_count: int | None
+    comment_count: int | None
 
 
 @dataclass(slots=True)
@@ -212,6 +232,7 @@ class VideoInfo(BaseModel):
     id: str
     title: str
     author: str | None = None
+    author_url: str | None = None
     url: str | None = None
     published_at: str | None = None
     summary: str | None = None

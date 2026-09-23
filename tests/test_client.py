@@ -8,7 +8,13 @@ from unittest.mock import patch
 import pytest
 
 from polylens_bilibili import client as client_mod
-from polylens_bilibili.client import BilibiliClient, _extract_page, _id_params, resolve_video
+from polylens_bilibili.client import (
+    BilibiliClient,
+    _extract_page,
+    _id_params,
+    resolve_up,
+    resolve_video,
+)
 from polylens_bilibili.errors import BilibiliError
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
@@ -287,3 +293,24 @@ def test_non_short_link_never_goes_online(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(client_mod, "urlopen", _boom)
     assert resolve_video(BV_URL)[0] == "BV1xx411c7mD"
+
+
+# ── UP 主定位 ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "https://space.bilibili.com/3690981465524933",
+        "https://space.bilibili.com/3690981465524933/upload/video",
+        "space.bilibili.com/3690981465524933?spm_id_from=333.1007",
+        " 3690981465524933 ",
+    ],
+)
+def test_resolve_up_accepts_space_link_or_mid(text: str) -> None:
+    assert resolve_up(text) == 3690981465524933
+
+
+def test_resolve_up_rejects_other_input() -> None:
+    with pytest.raises(BilibiliError):
+        resolve_up("高中物理老何")

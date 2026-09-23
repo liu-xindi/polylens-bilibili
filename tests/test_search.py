@@ -20,7 +20,7 @@ def test_strip_em_removes_highlight_tags() -> None:
 
 def test_to_search_item_maps_fields() -> None:
     raw = {
-        "title": '<em class="keyword">py</em>入门', "bvid": "BV1xx", "author": "up主",
+        "title": '<em class="keyword">py</em>入门', "bvid": "BV1xx", "author": "up主", "mid": 42,
         "play": 12345, "danmaku": 67, "duration": "10:00", "pubdate": 1700000000,
     }
     item = search_mod._to_search_item(raw)
@@ -28,6 +28,7 @@ def test_to_search_item_maps_fields() -> None:
     assert item.title == "py入门"  # 高亮标签清洗
     assert item.url == "https://www.bilibili.com/video/BV1xx"  # bvid 拼完整链接
     assert item.author == "up主"
+    assert item.author_url == "https://space.bilibili.com/42"
     assert item.view_count == 12345
     assert item.danmaku_count == 67
     assert item.duration_sec == 600.0

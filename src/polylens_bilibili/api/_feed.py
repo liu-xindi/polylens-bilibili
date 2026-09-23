@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import BilibiliError
-from ..models import FeedItem
+from ..models import FeedItem, space_url
 from ._constants import ENDPOINTS
 from ._http import HttpClient
 from ._search import _epoch_s_to_local, _int_or_none
@@ -39,6 +39,7 @@ def _to_feed_item(raw: Any) -> FeedItem | None:
         title=str(raw.get("title") or ""),
         url=f"https://www.bilibili.com/video/{bvid}",
         author=(raw.get("owner") or {}).get("name") or None,
+        author_url=space_url((raw.get("owner") or {}).get("mid")),
         published_at=_epoch_s_to_local(raw.get("pubdate")),
         duration_sec=_duration_seconds(raw.get("duration")),
         view_count=_int_or_none(stat.get("view")),

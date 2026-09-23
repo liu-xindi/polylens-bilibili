@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import BilibiliError
-from ..models import VideoInfo, VideoPart, to_local_time
+from ..models import VideoInfo, VideoPart, space_url, to_local_time
 from ._constants import ENDPOINTS
 from ._http import HttpClient
 
@@ -91,6 +91,7 @@ def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, in
         id=bvid,
         title=view.get("title", ""),
         author=(view.get("owner") or {}).get("name"),
+        author_url=space_url((view.get("owner") or {}).get("mid")),
         url=f"https://www.bilibili.com/video/{bvid}/",
         published_at=to_local_time(view.get("pubdate")),
         summary=_summary_of(view),

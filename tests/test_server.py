@@ -24,6 +24,7 @@ from polylens_bilibili.models import (
     ReplyThread,
     SearchItem,
     SubtitleEntry,
+    UpVideoItem,
     VideoInfo,
     VideoPart,
 )
@@ -31,7 +32,7 @@ from polylens_bilibili.models import (
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 _TOOL_NAMES = {
     "get_video_info", "get_parts", "get_comments", "get_comment_replies", "get_danmaku",
-    "get_subtitles", "get_frame", "search_videos", "suggest_keywords", "get_feed",
+    "get_subtitles", "get_frame", "search_videos", "suggest_keywords", "list_up_videos", "get_feed",
     "get_login_status", "logout", "start_qr_login", "complete_qr_login",
 }
 
@@ -240,7 +241,7 @@ def test_get_parts_returns_toon() -> None:
 def test_search_returns_toon_and_paging() -> None:
     page = Page(
         items=[
-            SearchItem(title="t1", url="u1", author=None, published_at=None,
+            SearchItem(title="t1", url="u1", author=None, author_url=None, published_at=None,
                        duration_sec=None, view_count=9, danmaku_count=None)
         ],
         has_more=True,
@@ -251,7 +252,8 @@ def test_search_returns_toon_and_paging() -> None:
     assert payload["count"] == 1
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
     assert payload["results"].startswith(
-        "results[1]{title,url,author,published_at,duration_sec,view_count,danmaku_count}:"
+        "results[1]{title,url,author,author_url,published_at,duration_sec,view_count,"
+        "danmaku_count}:"
     )
 
 
@@ -414,21 +416,52 @@ def test_suggest_keywords_returns_list() -> None:
     assert payload["elapsed_s"] >= 0
 
 
+# ── UP 主投稿 ───────────────────────────────────────────────────────────────
+
+
+def test_list_up_videos_resolves_link_and_returns_toon() -> None:
+    seen: dict[str, Any] = {}
+
+    def get_up_videos(mid: int, **kw: Any) -> tuple[str, Page[UpVideoItem]]:
+        seen.update(mid=mid, **kw)
+        return "老何", Page(
+            items=[UpVideoItem(title="t1", url="u1", published_at=None, duration_sec=None,
+                               view_count=9, danmaku_count=None, comment_count=None)],
+            has_more=True,
+            next_cursor="1",
+        )
+
+    with _with_client(get_up_videos=get_up_videos):
+        payload = _payload("list_up_videos", {
+            "author_url": "https://space.bilibili.com/42/upload/video", "order": "most_viewed",
+        })
+    assert seen["mid"] == 42 and seen["order"] == "most_viewed"
+    assert payload["author"] == "老何"
+    assert payload["author_url"] == "https://space.bilibili.com/42"
+    assert payload["videos"].startswith(
+        "videos[1]{title,url,published_at,duration_sec,view_count,danmaku_count,"
+        "comment_count}:"
+    )
+    assert payload["has_more"] is True and payload["next_cursor"] == "1"
+
+
 # ── 首页推荐 ────────────────────────────────────────────────────────────────
 
 
 def test_get_feed_returns_toon() -> None:
     items = [
-        FeedItem(title="t1", url="u1", author="甲", published_at="2026-08-17 10:00",
+        FeedItem(title="t1", url="u1", author="甲", author_url="s1",
+                 published_at="2026-08-17 10:00",
                  duration_sec=225.0, view_count=1234, rcmd_reason="1万点赞"),
-        FeedItem(title="t2", url="u2", author=None, published_at=None,
+        FeedItem(title="t2", url="u2", author=None, author_url=None, published_at=None,
                  duration_sec=None, view_count=None, rcmd_reason=None),
     ]
     with _with_client(get_feed=items):
         payload = _payload("get_feed", {"count": 2})
     assert payload["count"] == 2
     assert payload["feed"].startswith(
-        "feed[2]{title,url,author,published_at,duration_sec,view_count,rcmd_reason}:"
+        "feed[2]{title,url,author,author_url,published_at,duration_sec,view_count,"
+        "rcmd_reason}:"
     )
     assert "1万点赞" in payload["feed"]
     assert payload["elapsed_s"] >= 0

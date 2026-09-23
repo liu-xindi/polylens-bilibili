@@ -22,6 +22,7 @@ ENDPOINTS: dict[str, str] = {
     "qrcode_poll": "/x/passport-login/web/qrcode/poll",
     "search_type": "/x/web-interface/wbi/search/type",
     "suggest": "/x/web-interface/suggest",
+    "space_videos": "/x/space/wbi/arc/search",
     "feed_rcmd": "/x/web-interface/wbi/index/top/feed/rcmd",
 }
 

@@ -148,17 +148,18 @@ def test_search_items_toon_columns_are_fixed() -> None:
     out = to_toon(
         "results",
         [
-            SearchItem(title="t1", url="u1", author="甲", published_at=None,
+            SearchItem(title="t1", url="u1", author="甲", author_url="s1", published_at=None,
                        duration_sec=None, view_count=9, danmaku_count=None),
-            SearchItem(title="t2", url="u2", author=None, published_at=None,
+            SearchItem(title="t2", url="u2", author=None, author_url=None, published_at=None,
                        duration_sec=None, view_count=None, danmaku_count=None),
         ],
         SearchItem,
     )
     assert out == (
-        "results[2]{title,url,author,published_at,duration_sec,view_count,danmaku_count}:\n"
-        "  t1,u1,甲,,,9,\n"
-        "  t2,u2,,,,,"
+        "results[2]{title,url,author,author_url,published_at,duration_sec,view_count,"
+        "danmaku_count}:\n"
+        "  t1,u1,甲,s1,,,9,\n"
+        "  t2,u2,,,,,,"
     )
 
 
@@ -175,7 +176,7 @@ def test_video_info_keeps_all_fields_including_none_and_zero() -> None:
     d = VideoInfo(id="BV1", title="t", view_count=0).model_dump()
     assert d["view_count"] == 0
     assert d["author"] is None
-    assert set(d) == {"id", "title", "author", "url", "published_at", "summary",
+    assert set(d) == {"id", "title", "author", "author_url", "url", "published_at", "summary",
                       "duration_sec", "total_duration_sec", "view_count", "danmaku_count_total",
                       "comment_count",
                       "like_count", "favorite_count", "share_count", "coin_count",

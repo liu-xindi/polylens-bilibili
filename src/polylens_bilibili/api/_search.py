@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 from ..errors import BilibiliError, RateLimitedError
-from ..models import Page, SearchItem, to_local_time
+from ..models import Page, SearchItem, space_url, to_local_time
 from ._constants import ENDPOINTS, SEARCH_REFERER, SEARCH_RESULT_CAP
 from ._http import HttpClient, _RateLimited
 from ._signing import fetch_nav, sign_params
@@ -108,6 +108,7 @@ def _to_search_item(raw: Any) -> SearchItem | None:
         title=_strip_em(str(raw.get("title") or "")),
         url=f"https://www.bilibili.com/video/{bvid}",
         author=raw.get("author") or None,
+        author_url=space_url(raw.get("mid")),
         published_at=_epoch_s_to_local(raw.get("pubdate")),
         duration_sec=_duration_seconds(raw.get("duration")),
         view_count=_int_or_none(raw.get("play")),
