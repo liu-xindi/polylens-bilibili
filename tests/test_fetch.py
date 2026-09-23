@@ -257,6 +257,25 @@ def test_fetch_replies_limit_beyond_page_size_accumulates():
     assert t.page.has_more is True and t.page.next_cursor == "50"
 
 
+def test_fetch_replies_without_limit_reads_whole_thread():
+    seen_pn: list[int] = []
+    sized = _make_sized_sub_page({555: 45})
+
+    def _get_json(endpoint, params):
+        seen_pn.append(params["pn"])
+        return sized(endpoint, params)
+
+    client = MagicMock()
+    client.get_json.side_effect = _get_json
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        out = fetch_replies(client, 100, ["555"], cursor="5")
+    t = out[0]
+    assert seen_pn == [1, 2, 3]
+    assert len(t.page.items) == 40
+    assert t.page.items[0].content == "r555-5" and t.page.items[-1].content == "r555-44"
+    assert t.page.has_more is False and t.page.next_cursor is None
+
+
 def _make_sized_sub_page(sizes: dict[int, int]):
     """按 root（=comment_id）给不同楼不同总回复数；rpid = root*1000+下标，跨楼唯一。"""
 

@@ -306,13 +306,13 @@ def create_server(
             Field(description="主评论 id 列表，从 get_comments 返回的 comments 表里取。"),
         ],
         limit: Annotated[
-            int,
+            int | None,
             Field(
                 description=(
-                    "每个楼取多少条回复，超出的截断，用 cursor 续取。"
+                    "每个楼取多少条回复，超出的截断，用 cursor 续取。不传则取完整个楼。"
                 )
             ),
-        ],
+        ] = None,
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentRepliesResult:
         """按主评论 id 钻取楼中楼。

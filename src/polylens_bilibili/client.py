@@ -167,7 +167,12 @@ class BilibiliClient:
         return fetch_comments(self._http, aid, count=count, cursor=cursor, sort=sort)
 
     def get_comment_replies(
-        self, video_id: str, *, comment_ids: list[str], limit: int, cursor: str | None = None
+        self,
+        video_id: str,
+        *,
+        comment_ids: list[str],
+        limit: int | None = None,
+        cursor: str | None = None,
     ) -> list[ReplyThread]:
         if not comment_ids:
             return []
