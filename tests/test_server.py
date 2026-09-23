@@ -182,6 +182,7 @@ def test_get_comment_replies_groups_by_thread() -> None:
     assert "next_cursor" not in results[0]
     assert results[1]["has_more"] is False
     assert results[0]["replies"].startswith("replies[1]{")
+    assert "reply_count" not in results[0]["replies"]
 
 
 def test_get_comment_replies_surfaces_withheld() -> None:

@@ -316,7 +316,9 @@ def create_server(
         """按主评论 id 钻取楼中楼，回复按时间正序排列。
 
         withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
-        parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
+        parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id；
+        它可能指向被平台扣下、不在返回结果里的回复。
+        正文开头「回复 @名字」里的名字可能与被回复者当前的 author 不同，以 parent_id 为准。
 
         (comment replies, sub-replies, thread)
         """
@@ -327,7 +329,10 @@ def create_server(
             results=[
                 ReplyThreadItem(
                     comment_id=t.comment_id,
-                    replies=to_toon("replies", t.page.items, Comment),
+                    # 评论只有两层，楼中楼回复的 reply_count 恒为 0
+                    replies=to_toon(
+                        "replies", t.page.items, Comment, exclude=frozenset({"reply_count"})
+                    ),
                     has_more=t.page.has_more,
                     withheld=t.withheld,
                 )

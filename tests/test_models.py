@@ -164,6 +164,14 @@ def test_search_items_toon_columns_are_fixed() -> None:
     )
 
 
+def test_to_toon_exclude_drops_columns() -> None:
+    out = to_toon(
+        "subtitles", [SubtitleEntry(start=1.0, end=2.0, content="x")], SubtitleEntry,
+        exclude=frozenset({"end"}),
+    )
+    assert out == "subtitles[1]{start,content}:\n  1,x"
+
+
 def test_to_toon_empty_list_still_declares_columns() -> None:
     """空批次也要有表头：列由类型派生，不依赖有没有数据。"""
     assert to_toon("subtitles", [], SubtitleEntry) == "subtitles[0]{start,end,content}:"

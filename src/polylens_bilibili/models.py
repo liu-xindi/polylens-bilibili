@@ -79,12 +79,14 @@ def toon_table(name: str, rows: list[dict[str, Any]], columns: list[str]) -> str
     return "\n".join([header, *lines]) if lines else header
 
 
-def to_toon(name: str, items: list[Any], item_type: type) -> str:
-    """把数据类实例列表编码为 TOON 表格串。
+def to_toon(
+    name: str, items: list[Any], item_type: type, exclude: frozenset[str] = frozenset()
+) -> str:
+    """把数据类实例列表编码为 TOON 表格串。exclude 里的字段不出列。
 
     item_type 显式传入：列表为空时无从取得元素类型，而空表也需要表头。
     """
-    columns = [f.name for f in fields(item_type)]
+    columns = [f.name for f in fields(item_type) if f.name not in exclude]
     return toon_table(name, [asdict(it) for it in items], columns)
 
 
