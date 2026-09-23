@@ -243,7 +243,8 @@ def test_search_returns_toon_and_paging() -> None:
     page = Page(
         items=[
             SearchItem(title="t1", url="u1", author=None, author_url=None, published_at=None,
-                       duration_sec=None, view_count=9, danmaku_count=None)
+                       duration_sec=None, view_count=9, danmaku_count=None,
+                       favorite_count=None)
         ],
         has_more=True,
         next_cursor="1",
@@ -254,8 +255,20 @@ def test_search_returns_toon_and_paging() -> None:
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
     assert payload["results"].startswith(
         "results[1]{title,url,author,author_url,published_at,duration_sec,view_count,"
-        "danmaku_count}:"
+        "danmaku_count,favorite_count}:"
     )
+
+
+def test_search_passes_order_through() -> None:
+    seen: dict[str, Any] = {}
+
+    def search(**kw: Any) -> Page[SearchItem]:
+        seen.update(kw)
+        return Page(items=[])
+
+    with _with_client(search=search):
+        _payload("search_videos", {"query": "py", "order": "most_danmaku"})
+    assert seen["order"] == "most_danmaku"
 
 
 # ── 内联图片的两个工具 ──────────────────────────────────────────────────────

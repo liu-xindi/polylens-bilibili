@@ -434,6 +434,10 @@ def create_server(
             Field(description="搜索关键词。"),
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
+        order: Annotated[
+            Literal["relevance", "newest", "most_viewed", "most_danmaku", "most_favorited"],
+            Field(description="排序。relevance 是 B 站的综合排序。"),
+        ] = "relevance",
     ) -> SearchResult:
         """按关键词搜索 B 站视频，每批最多 30 条，可翻页。
 
@@ -445,7 +449,7 @@ def create_server(
 
         (search videos, find video by keyword)
         """
-        page = _client().search(query=query, cursor=cursor)
+        page = _client().search(query=query, cursor=cursor, order=order)
         return SearchResult(
             count=len(page.items),
             results=to_toon("results", page.items, SearchItem),

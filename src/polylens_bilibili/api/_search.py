@@ -115,11 +115,21 @@ def _to_search_item(raw: Any) -> SearchItem | None:
         duration_sec=_duration_seconds(raw.get("duration")),
         view_count=_int_or_none(raw.get("play")),
         danmaku_count=_int_or_none(raw.get("danmaku")),
+        favorite_count=_int_or_none(raw.get("favorites")),
     )
 
 
+ORDERS = {
+    "relevance": "totalrank",
+    "newest": "pubdate",
+    "most_viewed": "click",
+    "most_danmaku": "dm",
+    "most_favorited": "stow",
+}
+
+
 def fetch_search(
-    client: HttpClient, keyword: str, *, cursor: str | None = None
+    client: HttpClient, keyword: str, *, cursor: str | None = None, order: str = "relevance"
 ) -> Page[SearchItem]:
     """搜索关键词，取 cursor 指向的那一页视频结果 + 续取状态。"""
     query = keyword.strip()
@@ -129,7 +139,7 @@ def fetch_search(
     nav = fetch_nav(client)
     params = {
         "search_type": "video", "keyword": query, "page": pages_taken + 1,
-        "page_size": SEARCH_PAGE_SIZE,
+        "page_size": SEARCH_PAGE_SIZE, "order": ORDERS[order],
     }
     signed = sign_params(params, nav.img_key, nav.sub_key)
     try:

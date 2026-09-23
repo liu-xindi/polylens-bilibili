@@ -162,6 +162,7 @@ class SearchItem:
     duration_sec: float | None  # 时长秒数（平台给的是"总分钟:秒"文本，已换算）
     view_count: int | None
     danmaku_count: int | None
+    favorite_count: int | None
 
 
 @dataclass(slots=True)

@@ -149,17 +149,18 @@ def test_search_items_toon_columns_are_fixed() -> None:
         "results",
         [
             SearchItem(title="t1", url="u1", author="甲", author_url="s1", published_at=None,
-                       duration_sec=None, view_count=9, danmaku_count=None),
+                       duration_sec=None, view_count=9, danmaku_count=None, favorite_count=3),
             SearchItem(title="t2", url="u2", author=None, author_url=None, published_at=None,
-                       duration_sec=None, view_count=None, danmaku_count=None),
+                       duration_sec=None, view_count=None, danmaku_count=None,
+                       favorite_count=None),
         ],
         SearchItem,
     )
     assert out == (
         "results[2]{title,url,author,author_url,published_at,duration_sec,view_count,"
-        "danmaku_count}:\n"
-        "  t1,u1,甲,s1,,,9,\n"
-        "  t2,u2,,,,,,"
+        "danmaku_count,favorite_count}:\n"
+        "  t1,u1,甲,s1,,,9,,3\n"
+        "  t2,u2,,,,,,,"
     )
 
 

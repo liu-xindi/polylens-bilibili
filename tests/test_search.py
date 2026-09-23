@@ -26,7 +26,8 @@ def test_clean_title_unescapes_html_entities() -> None:
 def test_to_search_item_maps_fields() -> None:
     raw = {
         "title": '<em class="keyword">py</em>入门', "bvid": "BV1xx", "author": "up主", "mid": 42,
-        "play": 12345, "danmaku": 67, "duration": "10:00", "pubdate": 1700000000,
+        "play": 12345, "danmaku": 67, "favorites": 89, "duration": "10:00",
+        "pubdate": 1700000000,
     }
     item = search_mod._to_search_item(raw)
     assert item is not None
@@ -36,6 +37,7 @@ def test_to_search_item_maps_fields() -> None:
     assert item.author_url == "https://space.bilibili.com/42"
     assert item.view_count == 12345
     assert item.danmaku_count == 67
+    assert item.favorite_count == 89
     assert item.duration_sec == 600.0
     assert item.published_at is not None  # pubdate 转本机时区可读串
 
@@ -103,6 +105,27 @@ def test_page_size_fixed_and_cursor_counts_pages(monkeypatch: pytest.MonkeyPatch
     assert first.has_more is True and first.next_cursor == "1"
     _fetch(client, cursor=first.next_cursor)
     assert client.calls[1]["page"] == 2
+
+
+@pytest.mark.parametrize(
+    ("order", "platform"),
+    [
+        ("relevance", "totalrank"), ("newest", "pubdate"), ("most_viewed", "click"),
+        ("most_danmaku", "dm"), ("most_favorited", "stow"),
+    ],
+)
+def test_order_maps_to_platform_value(
+    monkeypatch: pytest.MonkeyPatch, order: str, platform: str
+) -> None:
+    client = _stub(monkeypatch, [])
+    search_mod.fetch_search(client, "kw", order=order)
+    assert client.calls[0]["order"] == platform
+
+
+def test_default_order_is_relevance(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _stub(monkeypatch, [])
+    _fetch(client)
+    assert client.calls[0]["order"] == "totalrank"
 
 
 def test_stops_at_result_cap(monkeypatch: pytest.MonkeyPatch) -> None:
