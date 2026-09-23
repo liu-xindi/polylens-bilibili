@@ -31,7 +31,7 @@ from polylens_bilibili.models import (
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 _TOOL_NAMES = {
     "get_video_info", "get_parts", "get_comments", "get_comment_replies", "get_danmaku",
-    "get_subtitles", "get_frame", "search_videos", "get_feed",
+    "get_subtitles", "get_frame", "search_videos", "suggest_keywords", "get_feed",
     "get_login_status", "logout", "start_qr_login", "complete_qr_login",
 }
 
@@ -401,6 +401,17 @@ def test_get_video_info_reports_total_duration() -> None:
         payload = _payload("get_video_info", {"url": BV_URL})
     assert payload["duration_sec"] == 79.0
     assert payload["total_duration_sec"] == 81976.0
+
+
+# ── 搜索联想 ────────────────────────────────────────────────────────────────
+
+
+def test_suggest_keywords_returns_list() -> None:
+    with _with_client(suggest=["python", "pycharm"]):
+        payload = _payload("suggest_keywords", {"term": "py"})
+    assert payload["count"] == 2
+    assert payload["suggestions"] == ["python", "pycharm"]
+    assert payload["elapsed_s"] >= 0
 
 
 # ── 首页推荐 ────────────────────────────────────────────────────────────────

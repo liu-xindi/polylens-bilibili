@@ -21,6 +21,7 @@ from .api._login import check_qr_login, start_qr_login
 from .api._search import fetch_search
 from .api._signing import fetch_nav
 from .api._subtitles import SubtitleTrack, fetch_subtitles
+from .api._suggest import fetch_suggest
 from .api._video import build_video_info, cid_for_page, clip_duration, fetch_view, list_parts
 from .errors import BilibiliError
 from .models import (
@@ -201,6 +202,9 @@ class BilibiliClient:
         self, *, query: str, count: int, cursor: str | None = None
     ) -> Page[SearchItem]:
         return fetch_search(self._http, query, count=count, cursor=cursor)
+
+    def suggest(self, term: str) -> list[str]:
+        return fetch_suggest(self._http, term)
 
     def get_feed(self, *, count: int) -> list[FeedItem]:
         return fetch_feed(self._http, count=count)

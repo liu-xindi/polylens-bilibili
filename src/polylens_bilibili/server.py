@@ -107,6 +107,12 @@ class SearchResult(BaseModel):
     elapsed_s: float | None = None
 
 
+class SuggestResult(BaseModel):
+    count: int
+    suggestions: list[str]
+    elapsed_s: float | None = None
+
+
 class FeedResult(BaseModel):
     count: int
     feed: str
@@ -180,7 +186,7 @@ def _make_qr_png(url: str) -> bytes:
 
 _SERVER_INSTRUCTIONS = (
     "本服务从 B 站视频中读取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
-    "并支持按关键词搜索视频、刷首页推荐。"
+    "并支持按关键词搜索视频、给出搜索联想词、刷首页推荐。"
 )
 
 _STATUS_MSG = {
@@ -444,6 +450,20 @@ def create_server(
             has_more=page.has_more,
             next_cursor=page.next_cursor,
         )
+
+    @mcp.tool(annotations=_READS_PLATFORM)
+    @_timed
+    def suggest_keywords(
+        term: Annotated[str, Field(description="已输入的关键词，可以只是开头几个字。")],
+    ) -> SuggestResult:
+        """给出 B 站搜索框的联想建议词，最多 10 条，没有建议时返回空表。
+
+        平台联想时会忽略 + # 等符号，C++ 与 C 得到的建议相同。
+
+        (search suggestions, autocomplete, related keywords)
+        """
+        suggestions = _client().suggest(term)
+        return SuggestResult(count=len(suggestions), suggestions=suggestions)
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
