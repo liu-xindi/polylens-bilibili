@@ -292,6 +292,7 @@ def test_consent_route_maps_outcomes_to_status(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     mcp = create_server(public_url="https://mcp.example.com", auth_secret="right")
     provider = mcp._auth_server_provider
+    assert isinstance(provider, oauth.OAuthProvider)
     app = TestClient(mcp.streamable_http_app(), base_url="https://mcp.example.com")
 
     req = _new_req(provider)
