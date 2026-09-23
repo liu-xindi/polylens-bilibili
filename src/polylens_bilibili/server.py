@@ -489,7 +489,8 @@ def create_server(
             Field(description="排序：最新发布、最多播放、最多收藏。"),
         ] = "newest",
         keyword: Annotated[
-            str | None, Field(description="只看标题含此关键词的投稿。不传则不筛选。")
+            str | None,
+            Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。不传则不筛选。"),
         ] = None,
     ) -> UpVideosResult:
         """列出 UP 主的投稿视频，每批 40 条，可翻页。

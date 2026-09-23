@@ -32,7 +32,7 @@ def _pin_timezone():
 def _raw(index: int) -> dict[str, Any]:
     return {
         "title": f"t{index}", "bvid": f"BV{index}", "created": 1700000000, "length": "16:07",
-        "play": 468982, "video_review": 641, "comment": 642, "author": "老何",
+        "play": 468982, "video_review": 641, "comment": 642, "author": "老何", "mid": MID,
     }
 
 
@@ -67,6 +67,20 @@ def test_maps_fields_and_author() -> None:
     assert item.published_at == "2023-11-15 06:13"
     assert item.duration_sec == 967.0
     assert (item.view_count, item.danmaku_count, item.comment_count) == (468982, 641, 642)
+
+
+def test_author_ignores_union_videos_by_others() -> None:
+    """联合投稿的署名是别人，昵称要从本人投稿里取。"""
+    union = {**_raw(0), "author": "特效小哥studio", "mid": 3066511}
+    own = {**_raw(1), "mid": MID}
+    author, _ = _fetch(_Client([union, own], total=2))
+    assert author == "老何"
+
+
+def test_page_without_own_videos_has_no_author() -> None:
+    union = {**_raw(0), "author": "特效小哥studio", "mid": 3066511}
+    author, page = _fetch(_Client([union], total=1))
+    assert author is None and len(page.items) == 1
 
 
 def test_no_videos_means_no_author() -> None:

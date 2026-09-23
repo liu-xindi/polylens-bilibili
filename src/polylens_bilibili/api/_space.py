@@ -42,7 +42,7 @@ def fetch_up_videos(
 ) -> tuple[str | None, Page[UpVideoItem]]:
     """取 UP 主的一页投稿，返回 (UP 主昵称, 这一页 + 续取状态)。
 
-    昵称取自条目：接口不单独给，一条投稿都没有时就是 None。
+    昵称取自本人投稿的条目：接口不单独给，这一页没有本人投稿时就是 None。
     """
     pages_taken = _parse_offset(cursor)
     params: dict[str, Any] = {
@@ -66,4 +66,6 @@ def fetch_up_videos(
         has_more=has_more,
         next_cursor=str(pages_taken + 1) if has_more else None,
     )
-    return (vlist[0].get("author") if vlist else None), page
+    # 列表里混有别人署名的联合投稿，昵称只从本人投稿里取
+    author = next((raw.get("author") for raw in vlist if raw.get("mid") == mid), None)
+    return author, page
