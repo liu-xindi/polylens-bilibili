@@ -248,7 +248,7 @@ def test_search_returns_toon_and_paging() -> None:
         next_cursor="1",
     )
     with _with_client(search=page):
-        payload = _payload("search_videos", {"query": "py", "count": 1})
+        payload = _payload("search_videos", {"query": "py"})
     assert payload["count"] == 1
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
     assert payload["results"].startswith(
@@ -352,7 +352,7 @@ def test_unparsable_url_is_tool_error() -> None:
         ("get_video_info", {"url": BV_URL}, {"get_video_info": VideoInfo(id="B", title="t")}),
         ("get_comments", {"url": BV_URL, "count": 1}, {"get_comments": Page(items=[])}),
         ("get_subtitles", {"url": BV_URL}, {"get_subtitles": SubtitleTrack([], None, [])}),
-        ("search_videos", {"query": "x", "count": 1}, {"search": Page(items=[])}),
+        ("search_videos", {"query": "x"}, {"search": Page(items=[])}),
     ],
 )
 def test_content_tools_attach_elapsed_s(

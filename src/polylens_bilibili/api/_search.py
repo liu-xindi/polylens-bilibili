@@ -1,8 +1,6 @@
 """搜索：调 search/type（WBI 签名），映射为 SearchItem。
 
-分页游标存的是绝对偏移量（已取到第几条），不是页码。页码的含义依赖每页条数，
-而每页条数握在调用方手里，游标察觉不到它变化；偏移量与之无关，因而自足：
-调用方中途改 count 也不会重复或漏取。
+每页固定 30 条，游标是已取的页数。
 到底判据：已取条数达结果上限、或平台一条都不给。标题去接口的高亮标签。
 """
 
@@ -13,7 +11,7 @@ from typing import Any
 
 from ..errors import BilibiliError, RateLimitedError
 from ..models import Page, SearchItem, space_url, to_local_time
-from ._constants import ENDPOINTS, SEARCH_REFERER, SEARCH_RESULT_CAP
+from ._constants import ENDPOINTS, SEARCH_PAGE_SIZE, SEARCH_REFERER, SEARCH_RESULT_CAP
 from ._http import HttpClient, _RateLimited
 from ._signing import fetch_nav, sign_params
 
@@ -117,39 +115,30 @@ def _to_search_item(raw: Any) -> SearchItem | None:
 
 
 def fetch_search(
-    client: HttpClient, keyword: str, *, count: int, cursor: str | None = None
+    client: HttpClient, keyword: str, *, cursor: str | None = None
 ) -> Page[SearchItem]:
-    """搜索关键词，从 cursor 指向的位置往后取一批视频结果 + 续取状态。
-
-    平台只认页码，故把偏移量换算成 (页码, 页内跳过数)：页码 = offset // count + 1，
-    再丢掉本页开头 offset % count 条，结果精确从第 offset+1 条接上。
-    count 不变时跳过数恒为 0，与直接翻页等价，本次即取满 count 条；
-    count 中途改小则跳过数非 0，本次只给到本页剩余（少于 count），不重不漏，
-    按 next_cursor 再喊一次接着取。
-    """
+    """搜索关键词，取 cursor 指向的那一页视频结果 + 续取状态。"""
     query = keyword.strip()
     if not query:
         raise BilibiliError("搜索关键词不能为空")
-    if count < 1:
-        raise BilibiliError(f"count 需为正整数，收到 {count}")
-    size = count
-    offset = _parse_offset(cursor)
-    page_num, skip = divmod(offset, size)
+    pages_taken = _parse_offset(cursor)
     nav = fetch_nav(client)
-    params = {"search_type": "video", "keyword": query, "page": page_num + 1, "page_size": size}
+    params = {
+        "search_type": "video", "keyword": query, "page": pages_taken + 1,
+        "page_size": SEARCH_PAGE_SIZE,
+    }
     signed = sign_params(params, nav.img_key, nav.sub_key)
     try:
         data = client.get_json(ENDPOINTS["search_type"], signed, referer=SEARCH_REFERER)
     except _RateLimited:
         # 判到底会把风控伪装成"没有更多结果"，翻页从此静默断掉
         raise RateLimitedError("搜索触发风控，稍后重试。") from None
-    # 整套换算系于"平台按请求的 page_size 分页"这一条实测事实, 而它是纯外部的。
-    # 平台哪天改回固定页大小, 切片照样成立, 只是窗口错位 —— 结果是静默截断, 没有任何信号。
-    # 响应回显了 pagesize 就核一遍, 把这个前提变成代码里自己会报警的不变量。
+    # 平台哪天不按请求的 page_size 分页，按页数续取就会错位，结果静默截断或重复。
+    # 响应回显了 pagesize 就核一遍，把这个前提变成代码里自己会报警的不变量。
     echoed_page_size = (data or {}).get("pagesize")
-    if echoed_page_size is not None and echoed_page_size != size:
+    if echoed_page_size is not None and echoed_page_size != SEARCH_PAGE_SIZE:
         raise BilibiliError(
-            f"平台未按请求的每页条数分页 (请求 {size}, 实为 {echoed_page_size})"
+            f"平台未按请求的每页条数分页 (请求 {SEARCH_PAGE_SIZE}, 实为 {echoed_page_size})"
         )
     result = (data or {}).get("result")
     if result is not None and not isinstance(result, list):
@@ -158,11 +147,10 @@ def fetch_search(
         # 它可切片可迭代, 逐字符都会被条目级的 isinstance 挡掉, 整页悄悄变空而游标照走。
         # 判在兜空值之前: "" 与 {} 也是形状变了, 不是"没有结果"。缺 result 才是没有结果。
         raise BilibiliError(f"搜索响应的 result 不是列表, 而是 {type(result).__name__}")
-    raw_items = (result or [])[skip:]
+    raw_items = result or []
     items = [item for raw in raw_items if (item := _to_search_item(raw)) is not None]
-    # 游标按消费掉的原始条目数推进，不是按映射成功的条数：跳过一条坏数据后若只进 1，
-    # 下一次会把它后面那条好数据再返回一遍。整页全坏也照样往前翻。
-    taken = offset + len(raw_items)
-    # 平台结果封顶 1000 条：判的是已取条数撞到上限，与每页取几条无关
-    has_more = taken < SEARCH_RESULT_CAP and len(raw_items) > 0
-    return Page(items=items, has_more=has_more, next_cursor=str(taken) if has_more else None)
+    # 平台结果封顶 1000 条
+    has_more = (pages_taken + 1) * SEARCH_PAGE_SIZE < SEARCH_RESULT_CAP and len(raw_items) > 0
+    return Page(
+        items=items, has_more=has_more, next_cursor=str(pages_taken + 1) if has_more else None
+    )

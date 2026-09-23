@@ -28,6 +28,7 @@ ENDPOINTS: dict[str, str] = {
 
 # 搜索结果总数封顶（前端翻页亦止于此）。
 SEARCH_RESULT_CAP = 1000
+SEARCH_PAGE_SIZE = 30
 
 # 楼中楼单页条数，平台封顶 20。
 REPLY_PAGE_SIZE = 20

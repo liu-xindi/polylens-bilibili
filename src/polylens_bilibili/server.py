@@ -438,25 +438,19 @@ def create_server(
             str,
             Field(description="搜索关键词。"),
         ],
-        count: Annotated[
-            int,
-            Field(
-                description=(
-                    "本批取多少条，从 cursor 位置连续取。"
-                    "平台单次分页有上限，超出会报错。"
-                )
-            ),
-        ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> SearchResult:
-        """按关键词搜索 B 站视频。
+        """按关键词搜索 B 站视频，每批 30 条，可翻页。
+
+        部分关键词（多见于学习类）的结果里会混入 B 站课堂的付费课程，它们不是普通视频，
+        已滤掉。
 
         返回的每条都带链接，可直接传给内容类工具取评论、
         字幕、弹幕等；author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
 
         (search videos, find video by keyword)
         """
-        page = _client().search(query=query, count=count, cursor=cursor)
+        page = _client().search(query=query, cursor=cursor)
         return SearchResult(
             count=len(page.items),
             results=to_toon("results", page.items, SearchItem),

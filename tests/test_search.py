@@ -85,98 +85,55 @@ def _stub(monkeypatch: pytest.MonkeyPatch, result: Any, **extra: Any) -> Any:
     return _Client()
 
 
-def _fetch(client, count: int, cursor: str | None = None) -> Page[SearchItem]:
-    return search_mod.fetch_search(client, "kw", count=count, cursor=cursor)
+def _fetch(client, cursor: str | None = None) -> Page[SearchItem]:
+    return search_mod.fetch_search(client, "kw", cursor=cursor)
 
 
-def test_cursor_is_offset_not_page_number(monkeypatch: pytest.MonkeyPatch) -> None:
-    """首次取 10 条，游标记的是已取条数而非页码。"""
-    client = _stub(monkeypatch, [_raw(i) for i in range(10)])
-    page = _fetch(client, count=10)
+def test_page_size_fixed_and_cursor_counts_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _stub(monkeypatch, [_raw(i) for i in range(30)])
+    first = _fetch(client)
     assert client.calls[0]["page"] == 1
-    assert client.calls[0]["page_size"] == 10
-    assert len(page.items) == 10
-    assert page.has_more is True
-    assert page.next_cursor == "10"
-
-
-def test_cursor_survives_count_change(monkeypatch: pytest.MonkeyPatch) -> None:
-    """已取 100 条后改成每批 30：换算到平台第 4 页并丢掉页内前 10 条，精确从第 101 条接上。
-
-    游标若只存页码，这里会退回第 31-60 条（全是重复），且第 101 条起永远取不到。
-    """
-    client = _stub(monkeypatch, [_raw(i) for i in range(91, 121)])
-    page = _fetch(client, count=30, cursor="100")
-    assert client.calls[0]["page"] == 4  # 100 // 30 + 1
-    assert page.items[0].title == "t101"  # 丢掉页内前 10 条
-    assert len(page.items) == 20
-    assert page.next_cursor == "120"
-
-
-def test_no_trim_when_count_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """count 不变时偏移量恒为其倍数，不发生修剪。"""
-    client = _stub(monkeypatch, [_raw(i) for i in range(100, 150)])
-    page = _fetch(client, count=50, cursor="100")
-    assert client.calls[0]["page"] == 3
-    assert len(page.items) == 50
-    assert page.next_cursor == "150"
+    assert client.calls[0]["page_size"] == 30
+    assert len(first.items) == 30
+    assert first.has_more is True and first.next_cursor == "1"
+    _fetch(client, cursor=first.next_cursor)
+    assert client.calls[1]["page"] == 2
 
 
 def test_stops_at_result_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """已取条数撞到结果上限（1000）→ has_more=false，即使本页满。"""
-    client = _stub(monkeypatch, [_raw(i) for i in range(50)])
-    page = _fetch(client, count=50, cursor="950")  # 950 + 50 = 1000
-    assert len(page.items) == 50
+    """第 34 页覆盖到第 1020 条，已越过结果上限（1000）→ has_more=false，即使本页有数据。"""
+    client = _stub(monkeypatch, [_raw(i) for i in range(990, 1000)])
+    page = _fetch(client, cursor="33")
+    assert client.calls[0]["page"] == 34
     assert page.has_more is False
     assert page.next_cursor is None
 
 
-def test_result_cap_holds_when_count_changes_midway(monkeypatch: pytest.MonkeyPatch) -> None:
-    """上限判的是已取条数，不是页码乘页大小：改小 count 后上限位置不该跟着漂。"""
-    client = _stub(monkeypatch, [_raw(i) for i in range(10)])
-    page = _fetch(client, count=10, cursor="980")  # 980 + 10 = 990 < 1000
-    assert page.has_more is True
-    assert page.next_cursor == "990"
+def test_page_before_cap_still_has_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _stub(monkeypatch, [_raw(i) for i in range(960, 990)])
+    page = _fetch(client, cursor="32")  # 第 33 页止于第 990 条
+    assert page.has_more is True and page.next_cursor == "33"
 
 
 def test_stops_on_empty_page(monkeypatch: pytest.MonkeyPatch) -> None:
     """平台一条都不给 → has_more=false（枯竭）。"""
-    page = _fetch(_stub(monkeypatch, []), count=10, cursor="30")
-    assert page.items == []
-    assert page.has_more is False
-    assert page.next_cursor is None
-
-
-def test_page_shorter_than_skip_ends_pagination(monkeypatch: pytest.MonkeyPatch) -> None:
-    """末页条数不足页内跳过数 → 本次一条也没消费掉，就此判到底。
-
-    到底判的必须是修剪之后的条数：若按修剪前的整页长度判，游标不动而 has_more 仍为真，
-    next_cursor 与入参游标相同，调用方按契约原样回传就是原地打转。
-    """
-    # 总共 100 条；count 改成 30 后换算到第 4 页，该页只有第 91-100 条
-    client = _stub(monkeypatch, [_raw(i) for i in range(91, 101)])
-    page = _fetch(client, count=30, cursor="100")  # divmod(100, 30) → page 4, skip 10
-    assert client.calls[0]["page"] == 4
+    page = _fetch(_stub(monkeypatch, []), cursor="3")
     assert page.items == []
     assert page.has_more is False
     assert page.next_cursor is None
 
 
 def test_echoed_page_size_mismatch_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
-    """平台回显的 pagesize 与请求不符 → 偏移量换算的前提没了，显式报错。
-
-    不判这一条，换算会照着错误的窗口切页：切片不报错，只是位置错，
-    结果是静默截断或重复，且没有任何信号能让调用方察觉。
-    """
+    """平台回显的 pagesize 与请求不符 → 按页数续取会错位，显式报错。"""
     client = _stub(monkeypatch, [_raw(i) for i in range(20)], pagesize=20)
     with pytest.raises(BilibiliError):
-        _fetch(client, count=50)
+        _fetch(client)
 
 
 def test_echoed_page_size_matching_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     """回显与请求一致时照常返回；回显缺席时不判（不是每个响应都带这个字段）。"""
-    client = _stub(monkeypatch, [_raw(i) for i in range(10)], pagesize=10)
-    assert len(_fetch(client, count=10).items) == 10
+    client = _stub(monkeypatch, [_raw(i) for i in range(30)], pagesize=30)
+    assert len(_fetch(client).items) == 30
 
 
 # ── 参数归一与游标校验 ──────────────────────────────────────────────────────
@@ -185,46 +142,32 @@ def test_echoed_page_size_matching_passes(monkeypatch: pytest.MonkeyPatch) -> No
 def test_empty_query_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _stub(monkeypatch, [])
     with pytest.raises(BilibiliError):
-        search_mod.fetch_search(client, "   ", count=10)
-    assert client.calls == []  # 不发请求
-
-
-@pytest.mark.parametrize("bad", [0, -3])
-def test_non_positive_count_rejected(monkeypatch: pytest.MonkeyPatch, bad: int) -> None:
-    client = _stub(monkeypatch, [_raw(1)])
-    with pytest.raises(BilibiliError):
-        _fetch(client, count=bad)
+        search_mod.fetch_search(client, "   ")
     assert client.calls == []  # 不发请求
 
 
 def test_negative_cursor_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _stub(monkeypatch, [_raw(1)])
     with pytest.raises(BilibiliError):
-        _fetch(client, count=10, cursor="-5")
+        _fetch(client, cursor="-5")
 
 
 def test_unparsable_cursor_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """游标由本能力发出，解析不了说明调用方自造了。"""
     client = _stub(monkeypatch, [_raw(1)])
     with pytest.raises(BilibiliError):
-        _fetch(client, count=10, cursor="not-a-number")
+        _fetch(client, cursor="not-a-number")
 
 
 # ── 条目映射的类型容错 ──────────────────────────────────────────────────────
 
 
-def test_item_without_bvid_is_skipped_but_still_consumes_cursor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """一条坏数据不该毁掉整页，而游标要按消费掉的条目数推进。
-
-    若按映射成功的条数推进，这里会给出游标 "1"，下一次只跳过那条坏数据，
-    于是同一条好数据再返回一遍。
-    """
+def test_item_without_bvid_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """一条坏数据不该毁掉整页，游标照常指向下一页。"""
     client = _stub(monkeypatch, [{"title": "无 bvid"}, _raw(1)])
-    page = _fetch(client, count=2)
+    page = _fetch(client)
     assert [item.title for item in page.items] == ["t1"]
-    assert page.next_cursor == "2"
+    assert page.next_cursor == "1"
 
 
 def test_rate_limited_surfaces_as_error_not_end_of_results(
@@ -239,7 +182,7 @@ def test_rate_limited_surfaces_as_error_not_end_of_results(
             raise search_mod._RateLimited()
 
     with pytest.raises(RateLimitedError):
-        _fetch(_Blocked(), count=10)
+        _fetch(_Blocked())
 
 
 @pytest.mark.parametrize("shape", ["abcdefg", {"a": 1}, 5, "", {}, 0, False])
@@ -252,15 +195,15 @@ def test_non_list_result_fails_loudly(monkeypatch: pytest.MonkeyPatch, shape: An
     悄悄改写成 []，当成"没有结果"放行。只有 result 整个缺席才是真的没有结果。
     """
     with pytest.raises(BilibiliError):
-        _fetch(_stub(monkeypatch, shape), count=10)
+        _fetch(_stub(monkeypatch, shape))
 
 
 def test_all_malformed_page_keeps_going(monkeypatch: pytest.MonkeyPatch) -> None:
     """整页全坏也照样往前翻：平台给了条目就不该在这里判到底。"""
-    page = _fetch(_stub(monkeypatch, [{"title": "x"}, "不是对象"]), count=2)
+    page = _fetch(_stub(monkeypatch, [{"title": "x"}, "不是对象"]))
     assert page.items == []
     assert page.has_more is True
-    assert page.next_cursor == "2"
+    assert page.next_cursor == "1"
 
 
 @pytest.mark.parametrize("junk", [
@@ -273,7 +216,7 @@ def test_unexpected_field_value_degrades_to_missing(
 ) -> None:
     """计数或时间戳给成异常类型时，只是该项没有，整条与整页都要留下。"""
     raw = _raw(1) | {"play": junk, "danmaku": junk, "pubdate": junk}
-    item = _fetch(_stub(monkeypatch, [raw]), count=1).items[0]
+    item = _fetch(_stub(monkeypatch, [raw])).items[0]
     assert item.url.endswith("BV1")
     assert item.published_at is None
     assert item.view_count is None
@@ -290,7 +233,7 @@ def test_out_of_range_pubdate_only_drops_the_time(
     两个字段的判据不同，不能混为一谈。
     """
     raw = _raw(1) | {"play": huge, "pubdate": huge}
-    item = _fetch(_stub(monkeypatch, [raw]), count=1).items[0]
+    item = _fetch(_stub(monkeypatch, [raw])).items[0]
     assert item.published_at is None
     assert item.view_count == huge
 
@@ -301,12 +244,12 @@ def test_absent_title_becomes_empty_string(
 ) -> None:
     """平台显式给 null 时标题是空串，不是字符串 "None"。"""
     raw = _raw(1) | {"title": absent}
-    assert _fetch(_stub(monkeypatch, [raw]), count=1).items[0].title == ""
+    assert _fetch(_stub(monkeypatch, [raw])).items[0].title == ""
 
 
 def test_zero_metrics_are_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     """新投稿播放量确实为 0，是真实计数而非缺失。"""
     raw = _raw(1) | {"play": 0, "danmaku": 0}
-    item = _fetch(_stub(monkeypatch, [raw]), count=1).items[0]
+    item = _fetch(_stub(monkeypatch, [raw])).items[0]
     assert item.view_count == 0
     assert item.danmaku_count == 0

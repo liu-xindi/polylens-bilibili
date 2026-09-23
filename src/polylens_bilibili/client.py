@@ -216,10 +216,8 @@ class BilibiliClient:
             raise BilibiliError(f"请求的时间 {at:g} 秒超出视频时长（约 {duration:g} 秒）")
         return fetch_frame(self._http, bvid, cid, at)
 
-    def search(
-        self, *, query: str, count: int, cursor: str | None = None
-    ) -> Page[SearchItem]:
-        return fetch_search(self._http, query, count=count, cursor=cursor)
+    def search(self, *, query: str, cursor: str | None = None) -> Page[SearchItem]:
+        return fetch_search(self._http, query, cursor=cursor)
 
     def suggest(self, term: str) -> list[str]:
         return fetch_suggest(self._http, term)
