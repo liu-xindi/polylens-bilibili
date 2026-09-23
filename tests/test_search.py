@@ -14,8 +14,13 @@ from polylens_bilibili.models import Page, SearchItem
 # ── 标题清洗 / 字段映射 ─────────────────────────────────────────────────────
 
 
-def test_strip_em_removes_highlight_tags() -> None:
-    assert search_mod._strip_em('这是<em class="keyword">Python</em>教程') == "这是Python教程"
+def test_clean_title_removes_highlight_tags() -> None:
+    assert search_mod._clean_title('这是<em class="keyword">Python</em>教程') == "这是Python教程"
+
+
+def test_clean_title_unescapes_html_entities() -> None:
+    raw = '【助力高考&amp;<em class="keyword">高中物理</em>】&lt;em&gt;'
+    assert search_mod._clean_title(raw) == "【助力高考&高中物理】<em>"
 
 
 def test_to_search_item_maps_fields() -> None:

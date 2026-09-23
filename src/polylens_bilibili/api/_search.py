@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 from typing import Any
 
@@ -18,9 +19,12 @@ from ._signing import fetch_nav, sign_params
 _EM_RE = re.compile(r"</?em[^>]*>", re.IGNORECASE)
 
 
-def _strip_em(text: str) -> str:
-    """去搜索结果标题里的高亮标签。"""
-    return _EM_RE.sub("", text)
+def _clean_title(text: str) -> str:
+    """去搜索结果标题里的高亮标签，再还原 &amp; 之类的 HTML 实体。
+
+    先去标签后还原：标题原文里若有 &lt;em&gt;，还原出的 <em> 是标题内容，不该被当标签去掉。
+    """
+    return html.unescape(_EM_RE.sub("", text))
 
 
 def _parse_offset(cursor: str | None) -> int:
@@ -103,7 +107,7 @@ def _to_search_item(raw: Any) -> SearchItem | None:
     if not isinstance(bvid, str) or not bvid:
         return None
     return SearchItem(
-        title=_strip_em(str(raw.get("title") or "")),
+        title=_clean_title(str(raw.get("title") or "")),
         url=f"https://www.bilibili.com/video/{bvid}",
         author=raw.get("author") or None,
         author_url=space_url(raw.get("mid")),
