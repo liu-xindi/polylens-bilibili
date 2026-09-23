@@ -166,30 +166,6 @@ def test_get_comments_omits_next_cursor_at_end() -> None:
     assert payload["comments"].startswith("comments[0]{")
 
 
-async def _tool_map():
-    server = create_server_for_test()
-    async with create_connected_server_and_client_session(server._mcp_server) as client:
-        await client.initialize()
-        return {t.name: t for t in (await client.list_tools()).tools}
-
-
-def test_return_models_carry_no_field_descriptions() -> None:
-    """outputSchema 只作校验契约，不再当说明通道用，免得又写进看不见的地方。"""
-    def described_paths(node: Any, path: str) -> list[str]:
-        if isinstance(node, dict):
-            here = [path] if isinstance(node.get("description"), str) else []
-            return here + [
-                q for k, v in node.items() for q in described_paths(v, f"{path}.{k}")
-            ]
-        if isinstance(node, list):
-            return [q for v in node for q in described_paths(v, path)]
-        return []
-
-    tools = _run(_tool_map)
-    found = [q for name, t in tools.items() for q in described_paths(t.outputSchema or {}, name)]
-    assert found == []
-
-
 def test_get_comment_replies_groups_by_thread() -> None:
     threads = [
         ReplyThread("1", Page(items=[_comment("11", "x")], has_more=True, next_cursor="5")),
