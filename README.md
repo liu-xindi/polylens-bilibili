@@ -1,6 +1,6 @@
 # polylens-bilibili
 
-polylens-bilibili 是一个 MCP 服务，用于读取 B 站公开视频的相关信息。
+用于读取 B 站公开视频的相关信息的 MCP 服务。
 
 ## 工具
 
@@ -64,12 +64,12 @@ claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bi
 | 公网地址 | `POLYLENS_BILIBILI_PUBLIC_URL` | `--public-url` | 无 |
 | 机主口令 | `POLYLENS_BILIBILI_AUTH_SECRET` | 仅环境变量 | 无 |
 
-公网地址与机主口令均设置后启用 OAuth；缺其一则以无鉴权运行。此时服务不校验任何身份，凡能连到监听端口的都可调用全部工具，包括读取已保存的登录凭据。
+公网地址与机主口令均设置后启用 OAuth；**缺其一则以无鉴权运行**。此时服务不校验任何身份，凡能连到监听端口的都可调用全部工具，包括读取已保存的登录凭据。
 
 ```bash
 POLYLENS_BILIBILI_TRANSPORT=http \
 POLYLENS_BILIBILI_PUBLIC_URL=https://example.com \
-POLYLENS_BILIBILI_AUTH_SECRET='<强口令>' \
+POLYLENS_BILIBILI_AUTH_SECRET='<口令>' \
 uv run polylens-bilibili
 ```
 
@@ -77,19 +77,11 @@ uv run polylens-bilibili
 
 ## 登录与 Cookie
 
-登录方式是扫码：调 `start_qr_login`，二维码作为图片直接返回在对话里，用 B站 App 扫码并在手机上确认后调 `complete_qr_login`，凭据自动写入本地。
-
 凭据存于 `~/.cache/polylens-bilibili/cookie`，`logout` 可删除。
 
 ## 免责声明
 
-polylens-bilibili 是开源工具，从 B 站的公开内容链接中提取信息，供个人学习、研究与技术交流使用。
-
-只读取内容，不修改，不上传，不向平台回写任何数据。访问基于用户自行提供的登录凭据，在用户自身账号的权限范围内进行，不绕过付费墙或平台的内容保护措施。对平台接口的调用为按其既定协议发起请求的互操作实现，不解密平台的受保护内容。数值配置随代码发版，不含远程配置。
-
-使用中产生的行为由使用者负责，需自行遵守适用法律、平台服务条款与版权规定。提取所得内容的版权归原发布方所有，其使用、留存与再分发由使用者自行判断并承担责任。
-
-按现状提供，不含任何明示或默示担保。使用或无法使用所引发的任何损失、纠纷或后果，由使用者自行承担。
+本工具供个人学习与研究使用，只读取内容，不向平台写入任何数据。需要登录的功能使用你自己的凭据，在你账号的权限范围内访问，不绕过付费墙或内容保护。所获内容版权归原发布方，使用者须自行遵守法律、平台条款与版权规定，并承担使用后果。本软件按现状提供，不附任何担保，详见 LICENSE。
 
 ## 许可证
 
