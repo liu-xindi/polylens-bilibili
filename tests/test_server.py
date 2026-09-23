@@ -169,7 +169,7 @@ def test_get_comments_omits_next_cursor_at_end() -> None:
 
 def test_get_comment_replies_groups_by_thread() -> None:
     threads = [
-        ReplyThread("1", Page(items=[_comment("11", "x")], has_more=True, next_cursor="5")),
+        ReplyThread("1", Page(items=[_comment("11", "x")], has_more=True)),
         ReplyThread("2", Page(items=[], has_more=False)),
     ]
     with _with_client(get_comment_replies=threads):
@@ -178,7 +178,8 @@ def test_get_comment_replies_groups_by_thread() -> None:
         )
     results = payload["results"]
     assert [r["comment_id"] for r in results] == ["1", "2"]
-    assert results[0]["has_more"] is True and results[0]["next_cursor"] == "5"
+    assert results[0]["has_more"] is True
+    assert "next_cursor" not in results[0]
     assert results[1]["has_more"] is False
     assert results[0]["replies"].startswith("replies[1]{")
 

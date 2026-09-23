@@ -67,7 +67,6 @@ class ReplyThreadItem(BaseModel):
     comment_id: str
     replies: str
     has_more: bool
-    next_cursor: str | None = None
     withheld: int = 0
 
 
@@ -309,22 +308,19 @@ def create_server(
             int | None,
             Field(
                 description=(
-                    "每个楼取多少条回复，超出的截断，用 cursor 续取。不传则取完整个楼。"
+                    "每个楼只取最早的多少条回复，has_more 表示被截断。不传则取完整个楼。"
                 )
             ),
         ] = None,
-        cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentRepliesResult:
-        """按主评论 id 钻取楼中楼。
+        """按主评论 id 钻取楼中楼，回复按时间正序排列。
 
-        withheld 是这个楼里平台不肯给出的回复条数。
+        withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
 
         (comment replies, sub-replies, thread)
         """
         video_id, _ = _resolve(url)
-        threads = _client().get_comment_replies(
-            video_id, comment_ids=comment_ids, limit=limit, cursor=cursor
-        )
+        threads = _client().get_comment_replies(video_id, comment_ids=comment_ids, limit=limit)
         return CommentRepliesResult(
             video_id=video_id,
             results=[
@@ -332,7 +328,6 @@ def create_server(
                     comment_id=t.comment_id,
                     replies=to_toon("replies", t.page.items, Comment),
                     has_more=t.page.has_more,
-                    next_cursor=t.page.next_cursor,
                     withheld=t.withheld,
                 )
                 for t in threads

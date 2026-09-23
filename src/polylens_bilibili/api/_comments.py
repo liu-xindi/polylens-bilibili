@@ -88,18 +88,14 @@ def _withheld_count(data: dict[str, Any]) -> int:
 
 
 def _fetch_thread(
-    client: HttpClient, aid: int, root_id: int, start: int, count: int | None
+    client: HttpClient, aid: int, root_id: int, limit: int | None
 ) -> tuple[Page[Comment], int]:
-    """取某主评论楼中楼的 [start, start+count) 窗口（pn 可跳页，从 start 所在页起）。
-
-    count 为 None 时一直翻到楼底。
-    """
-    pn = start // REPLY_PAGE_SIZE + 1
-    skip = start % REPLY_PAGE_SIZE  # 起始页内偏移
+    """从头取某主评论楼中楼的前 limit 条；limit 为 None 时一直翻到楼底。"""
+    pn = 1
     collected: list[dict[str, Any]] = []
     reached_end = False
     withheld = 0
-    while count is None or len(collected) < skip + count:
+    while limit is None or len(collected) < limit:
         data = client.get_json(
             ENDPOINTS["replies_sub"],
             {"oid": aid, "type": 1, "root": root_id, "ps": REPLY_PAGE_SIZE, "pn": pn},
@@ -112,11 +108,10 @@ def _fetch_thread(
             break
         pn += 1
         time.sleep(_REPLY_PAGE_DELAY)
-    window = collected[skip:] if count is None else collected[skip : skip + count]
+    window = collected if limit is None else collected[:limit]
     replies = [_normalize_reply(raw, root_id=root_id) for raw in window]
-    has_more = (skip + len(window) < len(collected)) or not reached_end
-    next_cursor = str(start + len(window)) if has_more else None
-    return Page(items=replies, has_more=has_more, next_cursor=next_cursor), withheld
+    has_more = len(window) < len(collected) or not reached_end
+    return Page(items=replies, has_more=has_more), withheld
 
 
 def fetch_replies(
@@ -125,10 +120,8 @@ def fetch_replies(
     comment_ids: list[str],
     *,
     limit: int | None = None,
-    cursor: str | None = None,
 ) -> list[ReplyThread]:
-    """按 comment_id 钻取楼中楼。limit 是每楼取多少条，超出截断，靠 cursor 续取；
-    不传则取到楼底。
+    """按 comment_id 钻取楼中楼。limit 是每楼只取前多少条；不传则取到楼底。
 
     内部串行（防风控）；中途触发风控则抛 RateLimitedError，不返回半程结果。
     楼中楼接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
@@ -137,12 +130,10 @@ def fetch_replies(
         raise BilibiliError(f"limit 需为正整数，收到 {limit}")
     if not fetch_nav(client).is_login:
         raise AuthRequiredError("comment_replies")
-    count = limit
-    start = int(cursor) if cursor else 0
     results: list[ReplyThread] = []
     try:
         for cid in comment_ids:
-            page, withheld = _fetch_thread(client, aid, int(cid), start, count)
+            page, withheld = _fetch_thread(client, aid, int(cid), limit)
             results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
             time.sleep(_AFTER_THREAD_DELAY)
     except _RateLimited:

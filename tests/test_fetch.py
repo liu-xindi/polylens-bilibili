@@ -219,23 +219,7 @@ def test_fetch_replies_slices_window_by_limit():
     t = out[0]
     assert t.comment_id == "555"
     assert len(t.page.items) == 5
-    assert t.page.has_more is True and t.page.next_cursor == "5"  # 满页还有更多
-
-
-def test_fetch_replies_cursor_jumps_to_page():
-    seen_pn: list[int] = []
-
-    def _get_json(endpoint, params):
-        seen_pn.append(params["pn"])
-        return _sub_page(endpoint, params)
-
-    client = MagicMock()
-    client.get_json.side_effect = _get_json
-    with _nav_patch("_comments"), _SLEEP_PATCH:
-        out = fetch_replies(client, 100, ["555"], limit=5, cursor="40")
-    assert seen_pn[0] == 3  # start=40 → pn 从 40//20+1=3 起，跳过前两页
-    assert out[0].page.items[0].content == "r40"  # 精确从第 40 条
-    assert out[0].page.next_cursor == "45"
+    assert t.page.has_more is True  # 满页还有更多
 
 
 def test_fetch_replies_limit_beyond_page_size_accumulates():
@@ -254,7 +238,7 @@ def test_fetch_replies_limit_beyond_page_size_accumulates():
     assert len(t.page.items) == 50
     assert seen_pn == [1, 2, 3]
     assert t.page.items[0].content == "r0" and t.page.items[49].content == "r49"
-    assert t.page.has_more is True and t.page.next_cursor == "50"
+    assert t.page.has_more is True
 
 
 def test_fetch_replies_without_limit_reads_whole_thread():
@@ -268,12 +252,12 @@ def test_fetch_replies_without_limit_reads_whole_thread():
     client = MagicMock()
     client.get_json.side_effect = _get_json
     with _nav_patch("_comments"), _SLEEP_PATCH:
-        out = fetch_replies(client, 100, ["555"], cursor="5")
+        out = fetch_replies(client, 100, ["555"])
     t = out[0]
     assert seen_pn == [1, 2, 3]
-    assert len(t.page.items) == 40
-    assert t.page.items[0].content == "r555-5" and t.page.items[-1].content == "r555-44"
-    assert t.page.has_more is False and t.page.next_cursor is None
+    assert len(t.page.items) == 45
+    assert t.page.items[0].content == "r555-0" and t.page.items[-1].content == "r555-44"
+    assert t.page.has_more is False
 
 
 def _make_sized_sub_page(sizes: dict[int, int]):
@@ -292,30 +276,16 @@ def _make_sized_sub_page(sizes: dict[int, int]):
     return _get
 
 
-def test_fetch_replies_batch_continuation_lockstep():
-    """批量续取：同次调用里没到底的楼共享同一 next_cursor；带它续取整批往下走，
-    各楼与上一页不重叠；已到底的楼掉队。"""
+def test_fetch_replies_limit_applies_per_thread():
+    """limit 对每个楼各自生效：没取完的楼标 has_more，一次到底的不标。"""
     client = MagicMock()
     client.get_json.side_effect = _make_sized_sub_page({1: 8, 2: 12, 3: 3})
-
     with _nav_patch("_comments"), _SLEEP_PATCH:
-        first = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
-    by_id = {t.comment_id: t for t in first}
-    # 没到底的两楼共享同一个 next_cursor（start+count 整批一致）
-    assert by_id["1"].page.has_more and by_id["1"].page.next_cursor == "5"
-    assert by_id["2"].page.has_more and by_id["2"].page.next_cursor == "5"
-    # 只有 3 条的楼一次到底、掉队（不带 next_cursor）
-    assert by_id["3"].page.has_more is False and by_id["3"].page.next_cursor is None
-
-    with _nav_patch("_comments"), _SLEEP_PATCH:
-        second = fetch_replies(client, 100, ["1", "2"], limit=5, cursor="5")
-    by_id2 = {t.comment_id: t for t in second}
-    for cid in ("1", "2"):
-        ids1 = {r.id for r in by_id[cid].page.items}
-        ids2 = {r.id for r in by_id2[cid].page.items}
-        assert ids1 and ids2 and ids1.isdisjoint(ids2)
-    assert by_id2["1"].page.has_more is False  # 8 条的楼这一窗到底
-    assert by_id2["2"].page.has_more and by_id2["2"].page.next_cursor == "10"
+        out = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
+    by_id = {t.comment_id: t for t in out}
+    assert [len(by_id[c].page.items) for c in ("1", "2", "3")] == [5, 5, 3]
+    assert by_id["1"].page.has_more and by_id["2"].page.has_more
+    assert by_id["3"].page.has_more is False
 
 
 def test_fetch_replies_reports_withheld_count():
