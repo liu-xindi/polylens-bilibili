@@ -435,7 +435,7 @@ def create_server(
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> SearchResult:
-        """按关键词搜索 B 站视频，每批 30 条，可翻页。
+        """按关键词搜索 B 站视频，每批最多 30 条，可翻页。
 
         部分关键词（多见于学习类）的结果里会混入 B 站课堂的付费课程，它们不是普通视频，
         已滤掉。
