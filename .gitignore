@@ -13,11 +13,9 @@ build/
 .pytest_cache/
 .ruff_cache/
 
-# 本地工具索引/配置
-.codegraph/
+# 本地工具配置
 .cursor/
 .vscode/
-.mcp.json
 
 # AI 助手规则，本地保留
 /AGENTS.md
