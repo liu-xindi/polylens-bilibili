@@ -316,6 +316,7 @@ def create_server(
         """按主评论 id 钻取楼中楼，回复按时间正序排列。
 
         withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
+        parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
 
         (comment replies, sub-replies, thread)
         """
