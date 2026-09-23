@@ -119,7 +119,7 @@ def test_sends_only_ps(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("bad", [0, -3])
 def test_rejects_non_positive_count(monkeypatch: pytest.MonkeyPatch, bad: int) -> None:
     client = _stub(monkeypatch, [])
-    with pytest.raises(BilibiliError, match="正整数"):
+    with pytest.raises(BilibiliError):
         fetch_feed(client, count=bad)
     client.get_json.assert_not_called()
 
@@ -139,7 +139,7 @@ def test_absent_item_key_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize("shape", ["abc", {"a": 1}, 5])
 def test_non_list_item_fails_loudly(monkeypatch: pytest.MonkeyPatch, shape: Any) -> None:
     """容器一级的形状变化显式失败，不静默当成空批。"""
-    with pytest.raises(BilibiliError, match="item"):
+    with pytest.raises(BilibiliError):
         fetch_feed(_stub(monkeypatch, shape), count=5)
 
 

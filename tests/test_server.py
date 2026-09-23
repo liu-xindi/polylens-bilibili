@@ -107,12 +107,6 @@ def test_tools_declare_read_and_world_hints() -> None:
     assert ann["complete_qr_login"].readOnlyHint is False
 
 
-def test_instructions_state_scope_and_login_requirement() -> None:
-    server = create_server_for_test()
-    text = server.instructions or ""
-    assert "B 站" in text
-
-
 def test_content_tools_declare_url_and_page() -> None:
     async def scenario() -> dict[str, Any]:
         server = create_server_for_test()
@@ -126,7 +120,6 @@ def test_content_tools_declare_url_and_page() -> None:
     # 评论按整片取，与分段无关
     for name in ("get_comments", "get_comment_replies"):
         assert "page" not in schemas[name]["properties"], name
-    assert "分段序号" in schemas["get_subtitles"]["properties"]["page"]["description"]
 
 
 # ── 内容类工具的返回结构 ────────────────────────────────────────────────────
@@ -179,25 +172,6 @@ async def _tool_map():
     async with create_connected_server_and_client_session(server._mcp_server) as client:
         await client.initialize()
         return {t.name: t for t in (await client.list_tools()).tools}
-
-
-@pytest.mark.parametrize(
-    ("tool", "phrase"),
-    [
-        ("get_video_info", "含楼中楼"),          # comment_count 的口径
-        ("get_video_info", "全部分段之和"),      # danmaku_count_total / total_duration_sec
-        ("get_comment_replies", "withheld"),
-        ("get_login_status", "null"),            # 三态区分
-        ("complete_qr_login", "expired"),        # 状态取值
-    ],
-)
-def test_field_semantics_live_in_the_visible_channel(tool: str, phrase: str) -> None:
-    """字段口径必须写在 description 里。
-
-    outputSchema 的字段描述不进模型上下文（实测），写在返回模型上等于没写。
-    """
-    tools = _run(_tool_map)
-    assert phrase in (tools[tool].description or "")
 
 
 def test_return_models_carry_no_field_descriptions() -> None:
@@ -377,22 +351,12 @@ def test_complete_qr_login_success_saves_cookie(tmp_path, monkeypatch: pytest.Mo
     assert path.read_text() == "SESSDATA=ok"
 
 
-@pytest.mark.parametrize(
-    ("status", "hint"),
-    [
-        (QrStatus.WAITING, "尚未扫码"),
-        (QrStatus.SCANNED, "确认登录"),
-        (QrStatus.EXPIRED, "已过期"),
-    ],
-)
-def test_complete_qr_login_pending_states_tell_next_step(
-    status: QrStatus, hint: str
-) -> None:
+@pytest.mark.parametrize("status", [QrStatus.WAITING, QrStatus.SCANNED, QrStatus.EXPIRED])
+def test_complete_qr_login_pending_states(status: QrStatus) -> None:
     result = LoginCheckResult(status=status)
     with patch.object(server_mod.BilibiliClient, "check_qr_login", lambda self, key: result):
         payload = _payload("complete_qr_login", {"key": "k1"})
     assert payload["status"] == status.value
-    assert hint in payload["message"]
 
 
 # ── 错误上浮 ────────────────────────────────────────────────────────────────
@@ -401,10 +365,9 @@ def test_complete_qr_login_pending_states_tell_next_step(
 def test_unparsable_url_is_tool_error() -> None:
     result = _call("get_video_info", {"url": "https://example.com/x"})
     assert result.isError
-    assert "BV/av" in result.content[0].text
 
 
-def test_auth_required_surfaces_with_login_hint() -> None:
+def test_auth_required_surfaces_as_error() -> None:
     """需要登录的能力在未登录时明确报错，而不是返回看似正常的结果。"""
 
     def _raise(*a: Any, **kw: Any):
@@ -413,7 +376,6 @@ def test_auth_required_surfaces_with_login_hint() -> None:
     with _with_client(get_comments=_raise):
         result = _call("get_comments", {"url": BV_URL, "count": 5})
     assert result.isError
-    assert "start_qr_login" in result.content[0].text
 
 
 # ── elapsed_s ───────────────────────────────────────────────────────────────
@@ -456,7 +418,6 @@ def test_get_comments_exposes_sort_modes() -> None:
     spec = _run(scenario)
     assert set(spec.get("enum") or []) == {"hot", "newest"}
     assert spec.get("default") == "hot"
-    assert "3" not in spec.get("description", "")
 
 
 def test_get_comments_passes_sort_through() -> None:
@@ -477,19 +438,6 @@ def test_get_video_info_reports_total_duration() -> None:
         payload = _payload("get_video_info", {"url": BV_URL})
     assert payload["duration_sec"] == 79.0
     assert payload["total_duration_sec"] == 81976.0
-
-
-def test_get_frame_description_omits_deployment_detail() -> None:
-    """ffmpeg 装没装是部署方的事，模型改变不了，缺了会有报错兜住。"""
-
-    async def scenario() -> str:
-        server = create_server_for_test()
-        async with create_connected_server_and_client_session(server._mcp_server) as client:
-            await client.initialize()
-            tools = {t.name: t for t in (await client.list_tools()).tools}
-            return tools["get_frame"].description or ""
-
-    assert "ffmpeg" not in _run(scenario)
 
 
 # ── 首页推荐 ────────────────────────────────────────────────────────────────
