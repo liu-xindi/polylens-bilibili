@@ -194,10 +194,7 @@ def _make_qr_png(url: str) -> bytes:
     return buf.getvalue()
 
 
-_SERVER_INSTRUCTIONS = (
-    "本服务从 B 站视频中读取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
-    "并支持按关键词搜索视频、给出搜索联想词、刷首页推荐、列出 UP 主的投稿。"
-)
+_SERVER_INSTRUCTIONS = "读取 B 站视频信息的工具集。"
 
 _STATUS_MSG = {
     QrStatus.WAITING: (
@@ -248,8 +245,6 @@ def create_server(
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> VideoInfoResult:
         """获取视频的标题、作者、发布时间、简介与各项统计。
-
-        author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
 
         统计口径：评论数含楼中楼回复；弹幕数与整片时长是全部分段之和，
         当前段时长只算这一段。
@@ -316,8 +311,7 @@ def create_server(
         """按主评论 id 钻取楼中楼，回复按时间正序排列。
 
         withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
-        parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id；
-        它可能指向被平台扣下、不在返回结果里的回复。
+        parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
         正文开头「回复 @名字」里的名字可能与被回复者当前的 author 不同，以 parent_id 为准。
 
         (comment replies, sub-replies, thread)
@@ -445,13 +439,9 @@ def create_server(
             Field(description="排序。relevance 是 B 站的综合排序。"),
         ] = "relevance",
     ) -> SearchResult:
-        """按关键词搜索 B 站视频，每批最多 30 条，可翻页。
+        """按关键词搜索 B 站视频，每批最多 30 条。
 
-        部分关键词（多见于学习类）的结果里会混入 B 站课堂的付费课程，它们不是普通视频，
-        已滤掉。
-
-        返回的每条都带链接，可直接传给内容类工具取评论、
-        字幕、弹幕等；author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
+        结果已滤掉付费课程，一批可能不满 30 条。
 
         (search videos, find video by keyword)
         """
@@ -468,7 +458,7 @@ def create_server(
     def suggest_keywords(
         term: Annotated[str, Field(description="已输入的关键词，可以只是开头几个字。")],
     ) -> SuggestResult:
-        """给出 B 站搜索框的联想建议词，最多 10 条，没有建议时返回空表。
+        """给出 B 站搜索框的联想建议词，最多 10 条。
 
         平台联想时会忽略 + # 等符号。
 
@@ -486,16 +476,14 @@ def create_server(
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
         order: Annotated[
             Literal["newest", "most_viewed", "most_favorited"],
-            Field(description="排序：最新发布、最多播放、最多收藏。"),
+            Field(description="排序。"),
         ] = "newest",
         keyword: Annotated[
             str | None,
-            Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。不传则不筛选。"),
+            Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。"),
         ] = None,
     ) -> UpVideosResult:
-        """列出 UP 主的投稿视频，每批 40 条，可翻页。
-
-        返回的每条都带链接，可直接传给内容类工具。
+        """列出 UP 主的投稿视频，每批 40 条。
 
         (uploader videos, channel uploads, other videos by this author)
         """
@@ -516,7 +504,6 @@ def create_server(
         """刷 B 站首页推荐流，每批最多 30 条。
 
         登录后按账号口味推，未登录给通用推荐。
-        author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
 
         (homepage feed, recommendations, browse)
         """
