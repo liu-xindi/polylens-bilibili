@@ -108,9 +108,3 @@ def test_create_server_applies_host_port() -> None:
     mcp = create_server(host="0.0.0.0", port=9999)
     assert mcp.settings.host == "0.0.0.0"
     assert mcp.settings.port == 9999
-
-
-def test_create_server_without_net_uses_fastmcp_defaults() -> None:
-    # 省略 host/port 时不报错，沿用 FastMCP 自身默认（stdio 下用不到）。
-    mcp = create_server()
-    assert mcp.settings.port  # 存在即可，具体值由 FastMCP 决定

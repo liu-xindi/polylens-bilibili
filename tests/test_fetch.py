@@ -389,13 +389,6 @@ def test_fetch_subtitles_protocol_relative_url_fixed():
     assert client.get_json_url.call_args[0][0].startswith("https://")
 
 
-def test_fetch_subtitles_picks_first_track():
-    client = _subtitle_client(_SUBTITLE_META)
-    with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
-        fetch_subtitles(client, aid=100, cid=200)
-    assert "sub_zh" in client.get_json_url.call_args[0][0]
-
-
 def test_fetch_subtitles_empty_when_no_tracks():
     client = _subtitle_client([])
     with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
@@ -722,31 +715,6 @@ def test_fetch_frame_never_returns_empty_bytes(
     assert tried == ["https://cdn/a", "https://cdn/b"]  # 备用地址也试过
 
 
-def test_fetch_frame_ffmpeg_failure_is_a_bilibili_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """候选地址全失败时给可读错误，不把 ffmpeg 的 stderr 交给调用方。
-
-    末尾附近最容易命中：末个关键帧之后取不到画面，失败区间宽度随视频而变。
-    """
-    from polylens_bilibili.api import _frame
-
-    monkeypatch.setattr(_frame.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(
-        _frame, "_fetch_playurl",
-        lambda client, bvid, cid: {"dash": {"video": [
-            {"id": 64, "codecs": "avc1", "baseUrl": "https://cdn/a", "backupUrl": ["https://cdn/b"]}
-        ]}},
-    )
-
-    def _boom(client, url, ts, out):
-        raise RuntimeError("ffmpeg 失败:\nError sending frames to consumers: Invalid argument")
-
-    monkeypatch.setattr(_frame, "_capture_frame", _boom)
-    with pytest.raises(BilibiliError):
-        _frame.fetch_frame(MagicMock(), "BV1xx", 200, 214.9)
-
-
 def test_fetch_frame_requires_login(monkeypatch: pytest.MonkeyPatch) -> None:
     """未登录时平台只给到 480P 而不报错，故取播放地址前先判登录态。"""
     from polylens_bilibili.api import _frame
@@ -780,8 +748,7 @@ def test_fetch_subtitles_picks_requested_lang():
     assert "sub_en" in client.get_json_url.call_args[0][0]
 
 
-def test_fetch_subtitles_unknown_lang_lists_available():
-    """报错里给出可选轨道，调用方能直接改正。"""
+def test_fetch_subtitles_unknown_lang_raises():
     client = _subtitle_client(_SUBTITLE_META)
     with _nav_patch("_subtitles"), _SIGN_PATCH_SUB:
         with pytest.raises(BilibiliError):

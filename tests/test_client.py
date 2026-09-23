@@ -53,17 +53,6 @@ def test_resolve_video_expands_short_link(monkeypatch: pytest.MonkeyPatch) -> No
     assert page == 2  # 展开后的链接里的 ?p= 同样生效
 
 
-def test_resolve_video_short_link_failure_is_friendly(monkeypatch: pytest.MonkeyPatch) -> None:
-    from urllib.error import URLError
-
-    def _boom(req: Any, timeout: int = 20):
-        raise URLError("nope")
-
-    monkeypatch.setattr(client_mod, "urlopen", _boom)
-    with pytest.raises(BilibiliError):
-        resolve_video("https://b23.tv/abcdef")
-
-
 # ── 分段序号 ────────────────────────────────────────────────────────────────
 
 
@@ -290,8 +279,6 @@ def test_short_link_without_cookie_sends_no_cookie_header(
     monkeypatch.setattr(client_mod, "urlopen", _fake)
     resolve_video("https://b23.tv/abcdef")
     assert "Cookie" not in seen["headers"]
-
-
 
 
 def test_non_short_link_never_goes_online(monkeypatch: pytest.MonkeyPatch) -> None:

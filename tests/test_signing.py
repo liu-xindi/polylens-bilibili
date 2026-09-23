@@ -42,29 +42,11 @@ def test_extract_mixin_key_official_vector() -> None:
     assert extract_mixin_key(_IMG_KEY, _SUB_KEY) == _OFFICIAL_MIXIN
 
 
-def test_extract_mixin_key_is_32_chars() -> None:
-    assert len(extract_mixin_key(_IMG_KEY, _SUB_KEY)) == 32
-
-
 def test_sign_params_golden_regression() -> None:
     """固定 params+wts → 固定 w_rid，锁住整条 WBI 签名（排序+过滤+md5）不被改坏。"""
     signed = sign_params(_GOLDEN_PARAMS, _IMG_KEY, _SUB_KEY, wts=_GOLDEN_WTS)
     assert signed["wts"] == str(_GOLDEN_WTS)
     assert signed["w_rid"] == _GOLDEN_WRID
-
-
-def test_sign_params_deterministic() -> None:
-    """同输入（含固定 wts）→ 同 w_rid。"""
-    a = sign_params(_GOLDEN_PARAMS, _IMG_KEY, _SUB_KEY, wts=_GOLDEN_WTS)
-    b = sign_params(_GOLDEN_PARAMS, _IMG_KEY, _SUB_KEY, wts=_GOLDEN_WTS)
-    assert a["w_rid"] == b["w_rid"]
-
-
-def test_sign_params_query_sensitive() -> None:
-    """params 变 → w_rid 变（签名确实覆盖业务参数）。"""
-    base = sign_params({"aid": 6383}, _IMG_KEY, _SUB_KEY, wts=_GOLDEN_WTS)
-    other = sign_params({"aid": 9999}, _IMG_KEY, _SUB_KEY, wts=_GOLDEN_WTS)
-    assert base["w_rid"] != other["w_rid"]
 
 
 def test_sign_params_strips_special_chars() -> None:

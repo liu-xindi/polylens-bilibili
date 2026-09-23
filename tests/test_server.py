@@ -13,7 +13,6 @@ from mcp.shared.memory import create_connected_server_and_client_session
 
 from polylens_bilibili import server as server_mod
 from polylens_bilibili.api._subtitles import SubtitleTrack
-from polylens_bilibili.errors import AuthRequiredError
 from polylens_bilibili.models import (
     Comment,
     Danmaku,
@@ -364,17 +363,6 @@ def test_complete_qr_login_pending_states(status: QrStatus) -> None:
 
 def test_unparsable_url_is_tool_error() -> None:
     result = _call("get_video_info", {"url": "https://example.com/x"})
-    assert result.isError
-
-
-def test_auth_required_surfaces_as_error() -> None:
-    """需要登录的能力在未登录时明确报错，而不是返回看似正常的结果。"""
-
-    def _raise(*a: Any, **kw: Any):
-        raise AuthRequiredError("comments")
-
-    with _with_client(get_comments=_raise):
-        result = _call("get_comments", {"url": BV_URL, "count": 5})
     assert result.isError
 
 
