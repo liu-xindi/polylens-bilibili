@@ -20,7 +20,6 @@
 | `get_subtitles` | 字幕，逐句，含起止秒数，可指定语种 | 是 |
 | `get_frame` | 截取指定时刻一帧，返回内联图片 | 是 |
 | `get_login_status` | 联网核验本地凭据是否仍然有效 | — |
-| `set_cookie` | 写入 Cookie，即时生效 | — |
 | `logout` | 删除本地 Cookie | — |
 | `start_qr_login` · `complete_qr_login` | 扫码登录 | — |
 
@@ -100,10 +99,7 @@ uv run polylens-bilibili
 
 评论、楼中楼、字幕、视频帧需要登录。未登录时平台不报错，而是给出残缺却看似正常的结果，所以这几个能力会先核验登录态，未登录时直接报错。
 
-两种登录方式：
-
-- **手动 Cookie**：把从浏览器复制的整段 Cookie（单行）传给 `set_cookie`，即时生效，无需重启。远程或移动端也可在对话中设置。
-- **扫码**：调 `start_qr_login`，二维码作为图片直接返回在对话里，用 B站 App 扫码并在手机上确认后调 `complete_qr_login`，凭据自动写入本地。
+登录方式是扫码：调 `start_qr_login`，二维码作为图片直接返回在对话里，用 B站 App 扫码并在手机上确认后调 `complete_qr_login`，凭据自动写入本地。
 
 凭据存于 `~/.cache/polylens-bilibili/cookie`，`logout` 可删除。
 

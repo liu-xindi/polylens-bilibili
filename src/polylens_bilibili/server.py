@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 
 from .client import BilibiliClient, resolve_video
 from .credentials import delete_cookie, load_cookie, save_cookie
-from .errors import BilibiliError
 from .models import (
     Comment,
     Danmaku,
@@ -118,10 +117,6 @@ class LoginStateResult(BaseModel):
     is_login: bool | None
 
 
-class CookieSavedResult(BaseModel):
-    message: str
-
-
 class LogoutResult(BaseModel):
     deleted: bool
     message: str
@@ -186,15 +181,6 @@ def _make_qr_png(url: str) -> bytes:
 _SERVER_INSTRUCTIONS = (
     "本服务从 B 站视频中提取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
     "并支持按关键词搜索视频、刷首页推荐。"
-    "内容类工具的 url 参数接受视频链接、b23.tv 短链或裸 BV/av 号；没有链接时用 "
-    "search_videos 按关键词找，或用 get_feed 看平台推什么。"
-    "评论、楼中楼、字幕、视频帧需要登录，未登录时会明确报错；"
-    "元信息、分段、弹幕、搜索、首页推荐无需登录。登录用 set_cookie 写入浏览器 Cookie，"
-    "或用 start_qr_login 扫码。"
-    "翻页统一：has_more=true 时把同一处返回的 next_cursor 原样回传给 cursor 取下一批，"
-    "=false 表示已到底；游标不透明，不要自造或解析。"
-    "列表类数据以 TOON 表格串返回，表头固定，同一工具每次返回的列相同。"
-    "日历时间按运行本机的时区呈现。内容类工具与搜索的返回附 elapsed_s，为服务端处理秒数。"
     "Bilibili video tools: video info, parts, comments and replies, danmaku (bullet comments), "
     "subtitles, video frames, search, homepage recommendation feed, login."
 )
@@ -250,8 +236,7 @@ def create_server(
         """获取视频的标题、作者、发布时间、简介与各项统计。
 
         统计口径：评论数含楼中楼回复；弹幕数与整片时长是全部分段之和，
-        当前段时长只算这一段。弹幕数是稿件累计值，与 get_danmaku 能取到的条数不是
-        同一口径，不能拿它估算能取多少条。
+        当前段时长只算这一段。
 
         (video info, metadata, stats)
         """
@@ -268,7 +253,7 @@ def create_server(
             Field(
                 description=(
                     "想要的主评论条数，实际返回可能多于或少于这个数。"
-                    "置顶评论排在第一页最前。数量决定这次调用的耗时，取几百条会明显变慢。"
+                    "置顶评论排在第一页最前。"
                 )
             ),
         ],
@@ -278,11 +263,9 @@ def create_server(
             Field(
                 description=(
                     "排序方式：hot 是平台的综合排序，newest 按时间倒序。"
-                    "hot 不等于按点赞数排，结果里会混入点赞很少的新评论；"
-                    "要按赞数取前几条，自己对返回的 like_count 排一遍。"
+                    "hot 不等于按点赞数排。"
                     "两者的游标性质也不同：hot 的游标绑在一次翻页过程上，中断后无法从原处接续，"
                     "重复用同一个游标会继续往后走；newest 的游标是位置标识，可以重复取到同一批。"
-                    "要完整抓取或需要断点续取时用 newest。"
                 )
             ),
         ] = "hot",
@@ -311,7 +294,6 @@ def create_server(
             Field(
                 description=(
                     "每个楼取多少条回复，超出的截断，用 cursor 续取。"
-                    "它与 comment_ids 的个数一起决定这次调用的耗时，两者都大时会明显变慢。"
                 )
             ),
         ],
@@ -319,9 +301,7 @@ def create_server(
     ) -> CommentRepliesResult:
         """按主评论 id 钻取楼中楼。需要登录。
 
-        翻页状态在每个楼里各一份，本工具没有顶层的 has_more 与 next_cursor。
-        withheld 是这个楼里平台不肯给出的回复条数，那些回复翻到底也取不到，
-        却仍可能被返回结果里的 parent_id 指到。
+        withheld 是这个楼里平台不肯给出的回复条数。
 
         (comment replies, sub-replies, thread)
         """
@@ -353,10 +333,7 @@ def create_server(
                 description=(
                     "想要的弹幕条数。取该段里 heat 最高的这么多条，结果仍按时间轴排序；"
                     "达到或超过该段弹幕总数即返回全部。"
-                    "heat 是平台给每条弹幕的标记，约 1-10 的档位，同档内不再细分；"
-                    "弹幕没有点赞数，与评论的排序依据是两回事。"
-                    "条数少于一档的规模时整批都落在最高档，此时按时间轴等距取，"
-                    "结果铺满全段而不是挤在开头。"
+                    "heat 是平台给每条弹幕的标记，约 1-10 的档位，同档内不再细分。"
                 )
             ),
         ],
@@ -443,7 +420,7 @@ def create_server(
     def search_videos(
         query: Annotated[
             str,
-            Field(description="搜索关键词，可以是标题、UP 主名、内容主题。"),
+            Field(description="搜索关键词。"),
         ],
         count: Annotated[
             int,
@@ -458,7 +435,7 @@ def create_server(
     ) -> SearchResult:
         """在 B 站按关键词搜索视频、找视频、检索投稿。
 
-        没有 BV 号或链接时用它入手：返回的每条都带链接，可直接传给内容类工具取评论、
+        返回的每条都带链接，可直接传给内容类工具取评论、
         字幕、弹幕等。
 
         (search videos, find video by keyword)
@@ -483,10 +460,9 @@ def create_server(
             ),
         ],
     ) -> FeedResult:
-        """刷 B 站首页推荐流，看平台现在推什么。
+        """刷 B 站首页推荐流。
 
-        登录后按账号口味推，未登录给通用推荐。每次调用都是新的一批，想多刷就多调几次；
-        这个流没有尽头也没有位置，既不能重放也不保证跨次调用不重复，要去重就按 url 自己去。
+        登录后按账号口味推，未登录给通用推荐。
 
         (homepage feed, recommendations, browse)
         """
@@ -502,20 +478,6 @@ def create_server(
         (login status)
         """
         return LoginStateResult(is_login=_client().get_login_status())
-
-    @mcp.tool(annotations=_LOCAL_ONLY)
-    def set_cookie(
-        cookie: Annotated[
-            str,
-            Field(description="从浏览器复制的整段 Cookie，单行。这是敏感凭据，会出现在对话中。"),
-        ],
-    ) -> CookieSavedResult:
-        """写入 B站登录 Cookie，即时生效。(set cookie, log in)"""
-        value = cookie.strip()
-        if not value:
-            raise BilibiliError("cookie 不能为空；清除登录用 logout")
-        save_cookie(value)
-        return CookieSavedResult(message="Cookie 已保存，即时生效；可调 get_login_status 确认。")
 
     @mcp.tool(annotations=_LOCAL_ONLY)
     def logout() -> LogoutResult:

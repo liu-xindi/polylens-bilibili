@@ -148,8 +148,7 @@ def fetch_search(
     echoed_page_size = (data or {}).get("pagesize")
     if echoed_page_size is not None and echoed_page_size != size:
         raise BilibiliError(
-            f"平台未按请求的每页条数分页 (请求 {size}, 实为 {echoed_page_size}); "
-            f"翻页换算的前提不再成立"
+            f"平台未按请求的每页条数分页 (请求 {size}, 实为 {echoed_page_size})"
         )
     result = (data or {}).get("result")
     if result is not None and not isinstance(result, list):
