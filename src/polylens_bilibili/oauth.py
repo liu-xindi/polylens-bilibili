@@ -12,9 +12,11 @@ import json
 import os
 import secrets
 import time
-from dataclasses import dataclass, field
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from mcp.server.auth.provider import (
@@ -34,6 +36,16 @@ from .credentials import write_private
 
 _ACCESS_TTL = 3600  # 访问令牌 1 小时；刷新令牌长期（claude.ai 后台静默续）
 _CODE_TTL = 600  # 授权码 10 分钟（库也会校验过期）
+
+# 同意页防暴力：DCR 与 authorize 都不需要身份，谁都能源源不断造出新的待同意请求，
+# 所以只按请求限次不够，另有一道不看请求、不看来源的全局闸。计数只在内存里，
+# 重启即清零：机主自己被锁住时，重启就是解锁办法。
+_PENDING_TTL = 300  # 待同意请求 5 分钟过期
+_PENDING_MAX = 100  # 同时最多这么多条，超出淘汰最旧的（不拒新的，免得机主被垃圾请求挡住）
+_TRIES_PER_REQ = 3  # 同一请求口令错到这么多次即作废
+_FAIL_WINDOW = 180  # 全局：这么多秒内
+_FAIL_LIMIT = 5  # 累计错这么多次
+_LOCKOUT = 300  # 就锁这么多秒，期间一律不校验口令
 _EMPTY: dict[str, dict[str, Any]] = {"clients": {}, "access_tokens": {}, "refresh_tokens": {}}
 
 
@@ -51,7 +63,8 @@ class _Pending:
     client_id: str
     client_label: str
     params: AuthorizationParams
-    created_at: float = field(default_factory=time.time)
+    created_at: float
+    failures: int = 0
 
 
 class OAuthProvider(
@@ -60,8 +73,14 @@ class OAuthProvider(
     """令牌只存哈希。"""
 
     def __init__(
-        self, *, issuer_url: str, resource_url: str, store_path: Path | None = None
+        self,
+        *,
+        issuer_url: str,
+        resource_url: str,
+        store_path: Path | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        self.clock = clock
         self._issuer = issuer_url.rstrip("/")
         self._resource = resource_url
         self._path = store_path or _store_path()
@@ -93,21 +112,45 @@ class OAuthProvider(
     async def authorize(
         self, client: OAuthClientInformationFull, params: AuthorizationParams
     ) -> str:
+        self._prune()
+        while len(self._pending) >= _PENDING_MAX:
+            del self._pending[next(iter(self._pending))]  # dict 按插入序，首个即最旧
         req_id = secrets.token_urlsafe(24)
         label = client.client_name or str(client.client_id)
         self._pending[req_id] = _Pending(
-            client_id=str(client.client_id), client_label=label, params=params
+            client_id=str(client.client_id), client_label=label, params=params,
+            created_at=self.clock(),
         )
         return f"{self._issuer}/consent?req={req_id}"
 
+    def _prune(self) -> None:
+        cutoff = self.clock() - _PENDING_TTL
+        for req_id in [k for k, v in self._pending.items() if v.created_at <= cutoff]:
+            del self._pending[req_id]
+
+    def _live(self, req_id: str) -> _Pending | None:
+        self._prune()
+        return self._pending.get(req_id)
+
     def pending_label(self, req_id: str) -> str | None:
-        pending = self._pending.get(req_id)
+        pending = self._live(req_id)
         return pending.client_label if pending else None
 
-    def grant_pending(self, req_id: str) -> str | None:
-        pending = self._pending.pop(req_id, None)
+    def record_failure(self, req_id: str) -> bool:
+        """记一次口令错误；达到上限即作废该请求。返回请求是否仍有效。"""
+        pending = self._live(req_id)
         if pending is None:
+            return False
+        pending.failures += 1
+        if pending.failures >= _TRIES_PER_REQ:
+            del self._pending[req_id]
+            return False
+        return True
+
+    def grant_pending(self, req_id: str) -> str | None:
+        if self._live(req_id) is None:
             return None
+        pending = self._pending.pop(req_id)
         p = pending.params
         code = secrets.token_urlsafe(32)  # ≥256 位熵，远超规范 160 位要求
         self._codes[code] = AuthorizationCode(
@@ -222,10 +265,43 @@ def build_oauth(public_url: str) -> tuple[dict[str, Any], OAuthProvider]:
     return kwargs, provider
 
 
+ConsentOutcome = Literal["granted", "wrong", "exhausted", "locked", "invalid"]
+
+
+class ConsentGate:
+    """同意页的口令校验：按请求限次，外加全局失败闸。"""
+
+    def __init__(self, provider: OAuthProvider, auth_secret: str) -> None:
+        self._provider = provider
+        self._secret = auth_secret
+        self._failures: deque[float] = deque()
+        self._locked_until = 0.0
+
+    def submit(self, req_id: str, secret: str) -> tuple[ConsentOutcome, str | None]:
+        now = self._provider.clock()
+        if now < self._locked_until:
+            return "locked", None  # 锁定期间口令对也不放行，否则闸形同虚设
+        if self._provider.pending_label(req_id) is None:
+            return "invalid", None
+        if secrets.compare_digest(secret, self._secret):
+            redirect = self._provider.grant_pending(req_id)
+            return ("granted", redirect) if redirect else ("invalid", None)
+        self._failures.append(now)
+        while self._failures and self._failures[0] <= now - _FAIL_WINDOW:
+            self._failures.popleft()
+        if len(self._failures) >= _FAIL_LIMIT:
+            self._locked_until = now + _LOCKOUT
+            self._failures.clear()
+        still_open = self._provider.record_failure(req_id)
+        return ("wrong" if still_open else "exhausted"), None
+
+
 def register_consent_route(mcp: Any, provider: OAuthProvider, auth_secret: str) -> None:
     """在 FastMCP 上挂 /consent 页：机主输入口令，正确则发授权码回跳客户端。"""
     from starlette.requests import Request
     from starlette.responses import HTMLResponse, RedirectResponse, Response
+
+    gate = ConsentGate(provider, auth_secret)
 
     async def consent(request: Request) -> Response:
         if request.method == "GET":
@@ -238,20 +314,25 @@ def register_consent_route(mcp: Any, provider: OAuthProvider, auth_secret: str) 
             return HTMLResponse(_render(req_id=req_id, client_label=label))
         form = await request.form()
         req_id, secret = str(form.get("req", "")), str(form.get("secret", ""))
-        label = provider.pending_label(req_id)
-        if label is None:
-            return HTMLResponse(
-                _render(notice="授权请求无效或已过期，回到客户端重新发起。"), status_code=400
-            )
-        if not secrets.compare_digest(secret, auth_secret):
+        label = provider.pending_label(req_id) or ""
+        outcome, redirect = gate.submit(req_id, secret)
+        if outcome == "granted" and redirect:
+            return RedirectResponse(url=redirect, status_code=302)
+        if outcome == "wrong":
             return HTMLResponse(
                 _render(req_id=req_id, client_label=label, error="口令不正确。"),
                 status_code=401,
             )
-        redirect = provider.grant_pending(req_id)
-        if redirect is None:
-            return HTMLResponse(_render(notice="授权请求无效或已过期。"), status_code=400)
-        return RedirectResponse(url=redirect, status_code=302)
+        if outcome == "exhausted":
+            return HTMLResponse(
+                _render(notice="口令错误次数过多，本次授权已作废，回到客户端重新发起。"),
+                status_code=401,
+            )
+        if outcome == "locked":
+            return HTMLResponse(_render(notice="尝试过于频繁，请稍后再试。"), status_code=429)
+        return HTMLResponse(
+            _render(notice="授权请求无效或已过期，回到客户端重新发起。"), status_code=400
+        )
 
     mcp.custom_route("/consent", methods=["GET", "POST"])(consent)
 

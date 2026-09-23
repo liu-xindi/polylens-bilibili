@@ -204,3 +204,102 @@ def test_create_server_no_oauth_without_secret() -> None:
 
 def test_create_server_no_oauth_by_default() -> None:
     assert create_server().settings.auth is None
+
+
+# ── 同意页防暴力 ──────────────────────────────────────────────────────────────
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _gated(tmp_path) -> tuple[oauth.OAuthProvider, oauth.ConsentGate, _Clock]:
+    clock = _Clock()
+    p = oauth.OAuthProvider(
+        issuer_url="https://mcp.example.com",
+        resource_url="https://mcp.example.com/mcp",
+        store_path=tmp_path / "store.json",
+        clock=clock,
+    )
+    return p, oauth.ConsentGate(p, "right"), clock
+
+
+def _new_req(p: oauth.OAuthProvider) -> str:
+    url = _run(p.authorize(_client(), _params()))
+    return parse_qs(urlparse(url).query)["req"][0]
+
+
+def test_consent_grants_with_right_secret(tmp_path) -> None:
+    p, gate, _ = _gated(tmp_path)
+    outcome, redirect = gate.submit(_new_req(p), "right")
+    assert outcome == "granted"
+    assert redirect is not None and "code=" in redirect
+
+
+def test_request_dropped_after_three_wrong_tries(tmp_path) -> None:
+    p, gate, _ = _gated(tmp_path)
+    req = _new_req(p)
+    assert gate.submit(req, "x")[0] == "wrong"
+    assert gate.submit(req, "x")[0] == "wrong"
+    assert gate.submit(req, "x")[0] == "exhausted"
+    assert gate.submit(req, "right")[0] == "invalid"  # 作废后口令对也没用
+
+
+def test_global_lock_after_five_failures_across_requests(tmp_path) -> None:
+    """换请求绕不过全局闸；锁定期间口令对也不放行。"""
+    p, gate, clock = _gated(tmp_path)
+    for _ in range(5):
+        gate.submit(_new_req(p), "x")
+        clock.t += 10
+    assert gate.submit(_new_req(p), "right")[0] == "locked"
+    clock.t += oauth._LOCKOUT
+    assert gate.submit(_new_req(p), "right")[0] == "granted"
+
+
+def test_failures_outside_window_do_not_lock(tmp_path) -> None:
+    p, gate, clock = _gated(tmp_path)
+    for _ in range(4):
+        gate.submit(_new_req(p), "x")
+    clock.t += oauth._FAIL_WINDOW + 1
+    gate.submit(_new_req(p), "x")  # 窗口内只有这 1 次
+    assert gate.submit(_new_req(p), "right")[0] == "granted"
+
+
+def test_pending_expires(tmp_path) -> None:
+    p, gate, clock = _gated(tmp_path)
+    req = _new_req(p)
+    clock.t += oauth._PENDING_TTL
+    assert p.pending_label(req) is None
+    assert gate.submit(req, "right")[0] == "invalid"
+
+
+def test_pending_count_is_capped_oldest_evicted(tmp_path) -> None:
+    p, _, _ = _gated(tmp_path)
+    first = _new_req(p)
+    reqs = [_new_req(p) for _ in range(oauth._PENDING_MAX)]
+    assert len(p._pending) == oauth._PENDING_MAX
+    assert p.pending_label(first) is None  # 最旧的被淘汰
+    assert p.pending_label(reqs[-1]) is not None  # 最新的在
+
+
+def test_consent_route_maps_outcomes_to_status(tmp_path, monkeypatch) -> None:
+    from starlette.testclient import TestClient
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    mcp = create_server(public_url="https://mcp.example.com", auth_secret="right")
+    provider = mcp._auth_server_provider
+    app = TestClient(mcp.streamable_http_app(), base_url="https://mcp.example.com")
+
+    req = _new_req(provider)
+    assert app.post("/consent", data={"req": req, "secret": "x"}).status_code == 401
+    ok = app.post("/consent", data={"req": req, "secret": "right"}, follow_redirects=False)
+    assert ok.status_code == 302
+    assert app.post("/consent", data={"req": "nope", "secret": "right"}).status_code == 400
+    for _ in range(5):
+        app.post("/consent", data={"req": _new_req(provider), "secret": "x"})
+    locked = app.post("/consent", data={"req": _new_req(provider), "secret": "right"})
+    assert locked.status_code == 429
