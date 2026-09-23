@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import time
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -102,7 +102,7 @@ def test_fetch_feed_filters_mixed_batch(monkeypatch: pytest.MonkeyPatch) -> None
         _video("BV1b"),
         {"goto": "live", "bvid": "", "title": "某直播间"},
     ])
-    items = fetch_feed(client, count=4)
+    items = fetch_feed(client)
     assert [i.url.rsplit("/", 1)[-1] for i in items] == ["BV1a", "BV1b"]
 
 
@@ -112,21 +112,13 @@ def test_fetch_feed_filters_mixed_batch(monkeypatch: pytest.MonkeyPatch) -> None
 def test_sends_only_ps(monkeypatch: pytest.MonkeyPatch) -> None:
     """带上 feed_version 平台就会往流里塞广告，只传 ps 拿到的是纯视频。"""
     client = _stub(monkeypatch, [_video()])
-    fetch_feed(client, count=12)
+    fetch_feed(client)
     _endpoint, params = client.get_json.call_args[0]
-    assert params == {"ps": 12}
-
-
-@pytest.mark.parametrize("bad", [0, -3])
-def test_rejects_non_positive_count(monkeypatch: pytest.MonkeyPatch, bad: int) -> None:
-    client = _stub(monkeypatch, [])
-    with pytest.raises(BilibiliError):
-        fetch_feed(client, count=bad)
-    client.get_json.assert_not_called()
+    assert params == {"ps": 30}
 
 
 def test_empty_batch_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert fetch_feed(_stub(monkeypatch, []), count=5) == []
+    assert fetch_feed(_stub(monkeypatch, [])) == []
 
 
 def test_absent_item_key_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,20 +126,20 @@ def test_absent_item_key_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(feed_mod, "sign_params", lambda p, *a, **k: p)
     client = MagicMock()
     client.get_json.return_value = {}
-    assert fetch_feed(client, count=5) == []
+    assert fetch_feed(client) == []
 
 
 @pytest.mark.parametrize("shape", ["abc", {"a": 1}, 5])
 def test_non_list_item_fails_loudly(monkeypatch: pytest.MonkeyPatch, shape: Any) -> None:
     """容器一级的形状变化显式失败，不静默当成空批。"""
     with pytest.raises(BilibiliError):
-        fetch_feed(_stub(monkeypatch, shape), count=5)
+        fetch_feed(_stub(monkeypatch, shape))
 
 
 def test_all_malformed_batch_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """整批都是坏条目时给空表，不报错：平台给了东西，只是我们用不上。"""
     client = _stub(monkeypatch, [{"goto": "ad"}, "不是对象", {"goto": "av"}])
-    assert fetch_feed(client, count=5) == []
+    assert fetch_feed(client) == []
 
 
 def test_works_without_login(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,7 +148,7 @@ def test_works_without_login(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(feed_mod, "sign_params", lambda p, *a, **k: p)
     client = MagicMock()
     client.get_json.return_value = {"item": [_video()]}
-    assert len(fetch_feed(client, count=1)) == 1
+    assert len(fetch_feed(client)) == 1
 
 
 def test_rate_limit_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,13 +159,4 @@ def test_rate_limit_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
     client = MagicMock()
     client.get_json.side_effect = _RateLimited()
     with pytest.raises(_RateLimited):
-        fetch_feed(client, count=5)
-
-
-def test_client_passes_count_through() -> None:
-    from polylens_bilibili.client import BilibiliClient
-
-    with patch.object(feed_mod, "fetch_nav", return_value=NavInfo("i", "s", True)):
-        with patch("polylens_bilibili.client.fetch_feed", return_value=[]) as spy:
-            BilibiliClient().get_feed(count=7)
-    assert spy.call_args.kwargs["count"] == 7
+        fetch_feed(client)

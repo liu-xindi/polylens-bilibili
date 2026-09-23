@@ -11,7 +11,7 @@ from typing import Any
 
 from ..errors import BilibiliError
 from ..models import FeedItem, space_url
-from ._constants import ENDPOINTS
+from ._constants import ENDPOINTS, FEED_PAGE_SIZE
 from ._http import HttpClient
 from ._search import _epoch_s_to_local, _int_or_none
 from ._signing import fetch_nav, sign_params
@@ -47,16 +47,14 @@ def _to_feed_item(raw: Any) -> FeedItem | None:
     )
 
 
-def fetch_feed(client: HttpClient, *, count: int) -> list[FeedItem]:
-    """取一批首页推荐。
+def fetch_feed(client: HttpClient) -> list[FeedItem]:
+    """取一批首页推荐，每批请求 30 条（平台上限，超出回 -400）。
 
     每次调用都是新的一批：平台按账号维护位置，没有游标也没有尽头。
     未登录时给通用推荐，与登录态的结果不重叠。
     """
-    if count < 1:
-        raise BilibiliError(f"count 需为正整数，收到 {count}")
     nav = fetch_nav(client)
-    data = client.get_json(ENDPOINTS["feed_rcmd"], sign_params({"ps": count},
+    data = client.get_json(ENDPOINTS["feed_rcmd"], sign_params({"ps": FEED_PAGE_SIZE},
                                                                nav.img_key, nav.sub_key))
     items = (data or {}).get("item")
     if items is not None and not isinstance(items, list):

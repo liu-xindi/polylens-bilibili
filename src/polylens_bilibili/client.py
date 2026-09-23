@@ -231,8 +231,8 @@ class BilibiliClient:
     ) -> tuple[str | None, Page[UpVideoItem]]:
         return fetch_up_videos(self._http, mid, cursor=cursor, order=order, keyword=keyword)
 
-    def get_feed(self, *, count: int) -> list[FeedItem]:
-        return fetch_feed(self._http, count=count)
+    def get_feed(self) -> list[FeedItem]:
+        return fetch_feed(self._http)
 
 
 def _id_params(video_id: str) -> dict[str, Any]:

@@ -472,7 +472,7 @@ def test_get_feed_returns_toon() -> None:
                  duration_sec=None, view_count=None, rcmd_reason=None),
     ]
     with _with_client(get_feed=items):
-        payload = _payload("get_feed", {"count": 2})
+        payload = _payload("get_feed")
     assert payload["count"] == 2
     assert payload["feed"].startswith(
         "feed[2]{title,url,author,author_url,published_at,duration_sec,view_count,"
@@ -493,12 +493,11 @@ def test_get_feed_takes_no_url() -> None:
             return tools["get_feed"].inputSchema
 
     schema = _run(scenario)
-    assert set(schema["properties"]) == {"count"}
-    assert schema["required"] == ["count"]
+    assert schema.get("properties", {}) == {}
 
 
 def test_get_feed_empty_batch() -> None:
     with _with_client(get_feed=[]):
-        payload = _payload("get_feed", {"count": 5})
+        payload = _payload("get_feed")
     assert payload["count"] == 0
     assert payload["feed"].startswith("feed[0]{")

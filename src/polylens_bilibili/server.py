@@ -512,24 +512,15 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
-    def get_feed(
-        count: Annotated[
-            int,
-            Field(
-                description=(
-                    "想要的视频条数。平台单次有上限，超出会报错。"
-                )
-            ),
-        ],
-    ) -> FeedResult:
-        """刷 B 站首页推荐流。
+    def get_feed() -> FeedResult:
+        """刷 B 站首页推荐流，每批最多 30 条。
 
         登录后按账号口味推，未登录给通用推荐。
         author_url 可传给 list_up_videos 查该 UP 主的其他投稿。
 
         (homepage feed, recommendations, browse)
         """
-        items = _client().get_feed(count=count)
+        items = _client().get_feed()
         return FeedResult(count=len(items), feed=to_toon("feed", items, FeedItem))
 
     @mcp.tool(annotations=_READS_PLATFORM)
