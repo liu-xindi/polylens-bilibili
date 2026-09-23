@@ -293,7 +293,6 @@ def test_start_qr_login_returns_inline_qr_image() -> None:
     assert result.content[0].data  # base64 PNG
     meta = json.loads(result.content[-1].text)
     assert meta["key"] == "k1"
-    assert meta["next_action"] == {"tool": "complete_qr_login", "args": {"key": "k1"}}
 
 
 # ── 登录类工具 ──────────────────────────────────────────────────────────────

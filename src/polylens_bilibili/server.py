@@ -179,10 +179,8 @@ def _make_qr_png(url: str) -> bytes:
 
 
 _SERVER_INSTRUCTIONS = (
-    "本服务从 B 站视频中提取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
+    "本服务从 B 站视频中读取信息：元信息、分段清单、评论、楼中楼、弹幕、字幕、视频帧，"
     "并支持按关键词搜索视频、刷首页推荐。"
-    "Bilibili video tools: video info, parts, comments and replies, danmaku (bullet comments), "
-    "subtitles, video frames, search, homepage recommendation feed, login."
 )
 
 _STATUS_MSG = {
@@ -263,14 +261,13 @@ def create_server(
             Field(
                 description=(
                     "排序方式：hot 是平台的综合排序，newest 按时间倒序。"
-                    "hot 不等于按点赞数排。"
                     "两者的游标性质也不同：hot 的游标绑在一次翻页过程上，中断后无法从原处接续，"
                     "重复用同一个游标会继续往后走；newest 的游标是位置标识，可以重复取到同一批。"
                 )
             ),
         ] = "hot",
     ) -> CommentsResult:
-        """获取视频的主评论，不含楼中楼。需要登录。(video comments)"""
+        """获取视频的主评论，不含楼中楼。(video comments)"""
         video_id, _ = _resolve(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
         return CommentsResult(
@@ -299,7 +296,7 @@ def create_server(
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> CommentRepliesResult:
-        """按主评论 id 钻取楼中楼。需要登录。
+        """按主评论 id 钻取楼中楼。
 
         withheld 是这个楼里平台不肯给出的回复条数。
 
@@ -339,7 +336,7 @@ def create_server(
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> DanmakuResult:
-        """获取视频弹幕，按热度取一批，仍按时间轴排序。(danmaku, bullet comments)"""
+        """获取视频弹幕。(danmaku, bullet comments)"""
         video_id, part = _resolve(url, page)
         bullets = _client().get_danmaku(video_id, count=count, page=part)
         return DanmakuResult(
@@ -359,12 +356,12 @@ def create_server(
                 description=(
                     "轨道语种，如 zh-CN、en-US、ai-zh。不传则取平台给的第一条，"
                     "而各段的轨道构成可能不同，要跨段拿同一语种就显式指定。"
-                    "可选值见返回的 available_langs；该段没有字幕时返回的 lang 为 null。"
+                    "可选值见返回的 available_langs。"
                 )
             ),
         ] = None,
     ) -> SubtitlesResult:
-        """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。需要登录。
+        """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。
 
         多段视频常只有一部分分段有字幕，与该段时长无关；没有的那些返回空表、
         lang 为 null、available_langs 为空。
@@ -402,11 +399,11 @@ def create_server(
     def get_frame(
         url: Annotated[str, Field(description=_URL_DESC)],
         timestamp: Annotated[
-            float, Field(description="视频内秒数，如 10.5。超过该段时长会报错。")
+            float, Field(description="视频内秒数，如 10.5。")
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> list[ImageContent | TextContent]:
-        """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录。(video frame, screenshot)"""
+        """截取视频指定时刻的一帧，返回内联 JPEG 图片。(video frame, screenshot)"""
         video_id, part = _resolve(url, page)
         jpeg = _client().get_frame(video_id, timestamp=timestamp, page=part)
         meta = {"video_id": video_id, "page": part}
@@ -427,13 +424,13 @@ def create_server(
             Field(
                 description=(
                     "本批取多少条，从 cursor 位置连续取。"
-                    "平台单次分页有上限，超出会被平台拒绝并报错。"
+                    "平台单次分页有上限，超出会报错。"
                 )
             ),
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
     ) -> SearchResult:
-        """在 B 站按关键词搜索视频、找视频、检索投稿。
+        """按关键词搜索 B 站视频。
 
         返回的每条都带链接，可直接传给内容类工具取评论、
         字幕、弹幕等。
@@ -455,7 +452,7 @@ def create_server(
             int,
             Field(
                 description=(
-                    "想要的视频条数。平台单次有上限，超出会被平台拒绝并报错。"
+                    "想要的视频条数。平台单次有上限，超出会报错。"
                 )
             ),
         ],
@@ -496,7 +493,6 @@ def create_server(
         meta = {
             "key": session.key,
             "message": "用 B站 App 扫描这张二维码，扫完并在手机上确认后调用 complete_qr_login。",
-            "next_action": {"tool": "complete_qr_login", "args": {"key": session.key}},
         }
         return [
             _png_block(_make_qr_png(session.url), "image/png"),
@@ -509,18 +505,12 @@ def create_server(
     ) -> QrCheckResult:
         """查询扫码结果，已确认则取回凭据并写入本地，登录即刻生效。
 
-        status 为 waiting 未扫码、scanned 已扫待手机确认、success 登录成功、
-        expired 二维码过期。每次只查一次。
-
         (finish QR code login, poll QR status)
         """
         result = BilibiliClient().check_qr_login(key)
         if result.status is QrStatus.SUCCESS:
-            path = save_cookie(result.cookie)
-            return QrCheckResult(
-                status="success",
-                message=f"登录成功，凭据已写入 {path}，后续工具直接读取。",
-            )
+            save_cookie(result.cookie)
+            return QrCheckResult(status="success", message="登录成功。")
         return QrCheckResult(
             status=result.status.value,
             message=_STATUS_MSG.get(result.status, "未知状态"),
