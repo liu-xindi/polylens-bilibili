@@ -30,6 +30,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyHttpUrl
 
+from .credentials import write_private
+
 _ACCESS_TTL = 3600  # 访问令牌 1 小时；刷新令牌长期（claude.ai 后台静默续）
 _CODE_TTL = 600  # 授权码 10 分钟（库也会校验过期）
 _EMPTY: dict[str, dict[str, Any]] = {"clients": {}, "access_tokens": {}, "refresh_tokens": {}}
@@ -75,12 +77,7 @@ class OAuthProvider(
         return {k: dict(data.get(k, {})) for k in _EMPTY}
 
     def _save(self, store: dict[str, dict[str, Any]]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
-        try:
-            os.chmod(self._path, 0o600)  # 仅本人可读写
-        except OSError:
-            pass
+        write_private(self._path, json.dumps(store, ensure_ascii=False, indent=2))
 
     # ── 客户端（DCR）─────────────────────────────────────────────────────────
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:

@@ -86,6 +86,7 @@ def test_run_maps_transport(
     monkeypatch: pytest.MonkeyPatch, argv: list[str], expected: str
 ) -> None:
     """对外的 http 映射到 FastMCP 的 streamable-http；host/port 透传给 create_server。"""
+    monkeypatch.setenv("POLYLENS_BILIBILI_INSECURE_NO_AUTH", "1")
     captured: dict[str, object] = {}
 
     class _FakeServer:
@@ -108,3 +109,56 @@ def test_create_server_applies_host_port() -> None:
     mcp = create_server(host="0.0.0.0", port=9999)
     assert mcp.settings.host == "0.0.0.0"
     assert mcp.settings.port == 9999
+
+
+def _no_run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """把 create_server 换成只记录传输方式的替身。"""
+    ran: list[str] = []
+
+    class _FakeServer:
+        def run(self, transport: str = "stdio") -> None:
+            ran.append(transport)
+
+    monkeypatch.setattr(serve, "create_server", lambda **kw: _FakeServer())
+    return ran
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {},
+        {"POLYLENS_BILIBILI_PUBLIC_URL": "https://example.com"},
+        {"POLYLENS_BILIBILI_AUTH_SECRET": "s3cret"},
+    ],
+)
+def test_http_without_full_oauth_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    """监听回环也可能被隧道转到公网，配置不全不能退到无鉴权。"""
+    for k in ("PUBLIC_URL", "AUTH_SECRET", "INSECURE_NO_AUTH"):
+        monkeypatch.delenv(f"POLYLENS_BILIBILI_{k}", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    ran = _no_run(monkeypatch)
+    with pytest.raises(SystemExit):
+        serve.run(["--transport", "http"])
+    assert ran == []
+
+
+def test_http_without_oauth_runs_only_with_explicit_opt_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for k in ("PUBLIC_URL", "AUTH_SECRET"):
+        monkeypatch.delenv(f"POLYLENS_BILIBILI_{k}", raising=False)
+    monkeypatch.setenv("POLYLENS_BILIBILI_INSECURE_NO_AUTH", "1")
+    ran = _no_run(monkeypatch)
+    serve.run(["--transport", "http"])
+    assert ran == ["streamable-http"]
+
+
+def test_stdio_needs_no_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    for k in ("PUBLIC_URL", "AUTH_SECRET", "INSECURE_NO_AUTH"):
+        monkeypatch.delenv(f"POLYLENS_BILIBILI_{k}", raising=False)
+    ran = _no_run(monkeypatch)
+    serve.run([])
+    assert ran == ["stdio"]

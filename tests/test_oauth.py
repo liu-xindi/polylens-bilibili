@@ -130,6 +130,7 @@ def test_tokens_stored_hashed_not_plaintext(tmp_path) -> None:
     assert token.refresh_token not in raw
     store = json.loads(raw)
     assert len(store["access_tokens"]) == 1  # 只存了哈希索引的记录
+    assert (tmp_path / "store.json").stat().st_mode & 0o777 == 0o600
 
 
 def test_refresh_rotates_and_invalidates_old(tmp_path) -> None:

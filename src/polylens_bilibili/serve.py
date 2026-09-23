@@ -29,6 +29,7 @@ class ServeConfig:
     port: int
     public_url: str | None = None  # OAuth 元数据用的对外公网地址
     auth_secret: str | None = None  # OAuth 同意页把关的机主口令
+    insecure_no_auth: bool = False  # 显式允许 http 无鉴权运行，仅供本机调试
 
     @property
     def oauth_enabled(self) -> bool:
@@ -59,15 +60,24 @@ def resolve_config(
 
     public_url = args.public_url or env.get(f"{_ENV_PREFIX}PUBLIC_URL") or None
     auth_secret = (env.get(f"{_ENV_PREFIX}AUTH_SECRET") or "").strip() or None
+    insecure = env.get(f"{_ENV_PREFIX}INSECURE_NO_AUTH", "").strip().lower() in ("1", "true", "yes")
 
     return ServeConfig(
         transport=transport, host=host, port=port,
-        public_url=public_url, auth_secret=auth_secret,
+        public_url=public_url, auth_secret=auth_secret, insecure_no_auth=insecure,
     )
 
 
 def run(argv: list[str] | None = None) -> None:
     config = resolve_config(argv)
+    # 监听本机回环也不等于只有本机可达：反向代理、隧道都会把它转到公网。
+    # 所以配置不全时拒绝启动，而不是退到无鉴权；要无鉴权必须显式开关。
+    if config.transport == "http" and not config.oauth_enabled and not config.insecure_no_auth:
+        raise SystemExit(
+            f"网络模式需要同时设置 {_ENV_PREFIX}PUBLIC_URL 与 {_ENV_PREFIX}AUTH_SECRET "
+            "以启用 OAuth；"
+            f"本机调试确需无鉴权时设 {_ENV_PREFIX}INSECURE_NO_AUTH=1。"
+        )
     server = create_server(
         host=config.host,
         port=config.port,
@@ -77,7 +87,7 @@ def run(argv: list[str] | None = None) -> None:
     if config.transport == "http":
         if not config.oauth_enabled:
             print(
-                f"网络模式未设 {_ENV_PREFIX}PUBLIC_URL + {_ENV_PREFIX}AUTH_SECRET：当前无鉴权，"
+                f"{_ENV_PREFIX}INSECURE_NO_AUTH 已开启：当前无鉴权，"
                 "仅适合本机调试，不要暴露于公网。",
                 file=sys.stderr,
             )

@@ -65,8 +65,9 @@ claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bi
 | 监听端口 | `POLYLENS_BILIBILI_HTTP_PORT` | `--port` | `6622` |
 | 公网地址 | `POLYLENS_BILIBILI_PUBLIC_URL` | `--public-url` | 无 |
 | 机主口令 | `POLYLENS_BILIBILI_AUTH_SECRET` | 仅环境变量 | 无 |
+| 允许无鉴权 | `POLYLENS_BILIBILI_INSECURE_NO_AUTH` | 仅环境变量 | 否 |
 
-公网地址与机主口令均设置后启用 OAuth；**缺其一则以无鉴权运行**。此时服务不校验任何身份，凡能连到监听端口的都可调用全部工具，包括读取已保存的登录凭据。
+公网地址与机主口令均设置后启用 OAuth；**缺其一则拒绝启动**。本机调试确需无鉴权时设 `POLYLENS_BILIBILI_INSECURE_NO_AUTH=1`，此时服务不校验任何身份，凡能连到监听端口的都可调用全部工具，包括读取已保存的登录凭据。
 
 ```bash
 POLYLENS_BILIBILI_TRANSPORT=http \

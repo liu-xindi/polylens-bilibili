@@ -102,3 +102,41 @@ def test_check_qr_login_success_extracts_cookies() -> None:
     assert "SESSDATA=abc" in result.cookie
     assert "bili_jct=xyz" in result.cookie
     assert "DedeUserID=123" in result.cookie
+
+
+def _mode(p) -> int:
+    import stat
+    return stat.S_IMODE(p.stat().st_mode)
+
+
+def test_save_cookie_is_private_regardless_of_umask(tmp_path, monkeypatch) -> None:
+    """明文 Cookie 可直接登录账号，不能跟着宽松的 umask 落成 0644。"""
+    import os
+
+    from polylens_bilibili import credentials
+
+    path = tmp_path / "cache" / "polylens-bilibili" / "cookie"
+    monkeypatch.setattr(credentials, "cookie_file_path", lambda: path)
+    old = os.umask(0o022)
+    try:
+        credentials.save_cookie("SESSDATA=x")
+    finally:
+        os.umask(old)
+    assert _mode(path) == 0o600
+    assert _mode(path.parent) == 0o700
+    assert path.read_text() == "SESSDATA=x"
+
+
+def test_write_private_tightens_existing_file_and_dir(tmp_path) -> None:
+    from polylens_bilibili.credentials import write_private
+
+    d = tmp_path / "d"
+    d.mkdir(mode=0o755)
+    f = d / "secret"
+    f.write_text("old")
+    f.chmod(0o644)
+    write_private(f, "new")
+    assert _mode(f) == 0o600
+    assert _mode(d) == 0o700
+    assert f.read_text() == "new"
+    assert [p.name for p in d.iterdir()] == ["secret"]  # 临时文件不残留
