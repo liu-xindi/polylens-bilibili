@@ -280,7 +280,7 @@ def create_server(
             ),
         ] = "hot",
     ) -> CommentsResult:
-        """获取视频的主评论，不含楼中楼。(video comments)"""
+        """获取视频的主评论，不含楼中楼。需要登录。(video comments)"""
         video_id, _ = _resolve(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
         return CommentsResult(
@@ -308,7 +308,7 @@ def create_server(
             ),
         ] = None,
     ) -> CommentRepliesResult:
-        """按主评论 id 钻取楼中楼，回复按时间正序排列。
+        """按主评论 id 钻取楼中楼，回复按时间正序排列。需要登录。
 
         withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
         parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
@@ -376,7 +376,7 @@ def create_server(
             ),
         ] = None,
     ) -> SubtitlesResult:
-        """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。
+        """获取视频字幕，逐句返回。需要登录。字幕可能为 AI 生成或机器翻译，存在误差。
 
         多段视频常只有一部分分段有字幕，与该段时长无关；没有的那些返回空表、
         lang 为 null、available_langs 为空。
@@ -418,7 +418,12 @@ def create_server(
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> list[ImageContent | TextContent]:
-        """截取视频指定时刻的一帧，返回内联 JPEG 图片。(video frame, screenshot)"""
+        """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录。
+
+        运行本服务的机器需装有 ffmpeg。
+
+        (video frame, screenshot)
+        """
         video_id, part = _resolve(url, page)
         jpeg = _client().get_frame(video_id, timestamp=timestamp, page=part)
         meta = {"video_id": video_id, "page": part}
