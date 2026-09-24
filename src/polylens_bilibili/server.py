@@ -37,7 +37,9 @@ from .models import (
 # ── 参数说明 ────────────────────────────────────────────────────────────────
 
 _URL_DESC = "视频链接、b23.tv 短链，或裸 BV/av 号；含链接的分享文案也可直接传入。"
-_PAGE_DESC = "分段序号，1 起。不传时取链接里的 ?p=N，两者都没有则第 1 段。"
+_PAGE_DESC = (
+    "分段序号，1 起。不传时取链接里的 ?p=N，两者都没有则第 1 段。单段视频忽略此项。"
+)
 _CURSOR_DESC = "续取游标：不传从头开始，回传上次返回的 next_cursor 取下一批。"
 
 # ── 返回模型 ────────────────────────────────────────────────────────────────
@@ -244,7 +246,8 @@ def create_server(
     ) -> VideoInfoResult:
         """获取视频的标题、作者、发布时间、简介与各项统计。
 
-        统计口径：弹幕数与整片时长是全部分段之和，当前段时长只算这一段。
+        统计口径：评论数含楼中楼回复；弹幕数与整片时长是全部分段之和，
+        当前段时长只算这一段。
 
         (video info, metadata, stats)
         """
@@ -258,14 +261,21 @@ def create_server(
         url: Annotated[str, Field(description=_URL_DESC)],
         count: Annotated[
             int,
-            Field(description="想要的主评论条数。"),
+            Field(
+                description=(
+                    "想要的主评论条数，实际返回可能多于或少于这个数。"
+                    "置顶评论排在第一页最前。"
+                )
+            ),
         ],
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
         mode: Annotated[
             Literal["hot", "newest"],
             Field(
                 description=(
-                    "排序方式。hot 的游标中断后无法从原处接续，要翻完全部评论用 newest。"
+                    "排序方式：hot 是平台的综合排序，newest 按时间倒序。"
+                    "两者的游标性质也不同：hot 的游标绑在一次翻页过程上，中断后无法从原处接续，"
+                    "重复用同一个游标会继续往后走；newest 的游标是位置标识，可以重复取到同一批。"
                 )
             ),
         ] = "hot",
@@ -298,11 +308,12 @@ def create_server(
             ),
         ] = None,
     ) -> CommentRepliesResult:
-        """按主评论 id 钻取楼中楼。
+        """按主评论 id 钻取楼中楼，回复按时间正序排列。
 
+        withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
         parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
         parent_id 指向的回复不在列表里时，那条被平台隐藏了，取不到。
-        withheld 是整个楼里被隐藏的回复条数。
+        正文开头「回复 @名字」里的名字可能与被回复者当前的 author 不同，以 parent_id 为准。
 
         (comment replies, sub-replies, thread)
         """
@@ -332,9 +343,9 @@ def create_server(
             int,
             Field(
                 description=(
-                    "想要的弹幕条数。取该段里 heat 最高的这么多条，"
+                    "想要的弹幕条数。取该段里 heat 最高的这么多条，结果仍按时间轴排序；"
                     "达到或超过该段弹幕总数即返回全部。"
-                    "heat 是平台给每条弹幕的标记，约 1-10 的档位。"
+                    "heat 是平台给每条弹幕的标记，约 1-10 的档位，同档内不再细分。"
                 )
             ),
         ],
@@ -367,7 +378,8 @@ def create_server(
     ) -> SubtitlesResult:
         """获取视频字幕，逐句返回。字幕可能为 AI 生成或机器翻译，存在误差。
 
-        多段视频常只有一部分分段有字幕。
+        多段视频常只有一部分分段有字幕，与该段时长无关；没有的那些返回空表、
+        lang 为 null、available_langs 为空。
 
         (subtitles, captions, transcript)
         """
@@ -386,7 +398,7 @@ def create_server(
     def get_parts(
         url: Annotated[str, Field(description=_URL_DESC)],
     ) -> PartsResult:
-        """列出多段视频（分 P）的全部分段。(video parts, pages)"""
+        """列出多段视频（分 P）的全部分段。单段视频返回一项。(video parts, pages)"""
         video_id, _ = _resolve(url)
         parts = _client().get_parts(video_id)
         return PartsResult(
@@ -425,10 +437,12 @@ def create_server(
         cursor: Annotated[str | None, Field(description=_CURSOR_DESC)] = None,
         order: Annotated[
             Literal["relevance", "newest", "most_viewed", "most_danmaku", "most_favorited"],
-            Field(description="排序。"),
+            Field(description="排序。relevance 是 B 站的综合排序。"),
         ] = "relevance",
     ) -> SearchResult:
         """按关键词搜索 B 站视频，每批最多 30 条。
+
+        结果已滤掉付费课程，一批可能不满 30 条。
 
         (search videos, find video by keyword)
         """
@@ -446,6 +460,8 @@ def create_server(
         term: Annotated[str, Field(description="已输入的关键词，可以只是开头几个字。")],
     ) -> SuggestResult:
         """给出 B 站搜索框的联想建议词，最多 10 条。
+
+        平台联想时会忽略 + # 等符号。
 
         (search suggestions, autocomplete, related keywords)
         """
@@ -465,7 +481,7 @@ def create_server(
         ] = "newest",
         keyword: Annotated[
             str | None,
-            Field(description="按关键词筛选投稿。"),
+            Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。"),
         ] = None,
     ) -> UpVideosResult:
         """列出 UP 主的投稿视频，每批 40 条。
@@ -497,7 +513,7 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:
-        """查询当前是否已登录。
+        """查询当前是否已登录（联网核验本地凭据是否仍然有效）。
 
         is_login 为 null 表示无法验证，与 false 不同。
 
@@ -532,7 +548,7 @@ def create_server(
     def complete_qr_login(
         key: Annotated[str, Field(description="start_qr_login 返回的 key。")],
     ) -> QrCheckResult:
-        """查询扫码结果，已确认则登录即刻生效。
+        """查询扫码结果，已确认则取回凭据并写入本地，登录即刻生效。
 
         (finish QR code login, poll QR status)
         """
