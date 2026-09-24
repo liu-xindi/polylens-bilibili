@@ -439,9 +439,9 @@ def test_suggest_keywords_returns_list() -> None:
 def test_list_up_videos_resolves_link_and_returns_toon() -> None:
     seen: dict[str, Any] = {}
 
-    def get_up_videos(mid: int, **kw: Any) -> tuple[str, Page[UpVideoItem]]:
+    def get_up_videos(mid: int, **kw: Any) -> tuple[str, int, Page[UpVideoItem]]:
         seen.update(mid=mid, **kw)
-        return "老何", Page(
+        return "老何", 497, Page(
             items=[UpVideoItem(title="t1", url="u1", published_at=None, duration_sec=None,
                                view_count=9, danmaku_count=None, comment_count=None)],
             has_more=True,
@@ -455,6 +455,7 @@ def test_list_up_videos_resolves_link_and_returns_toon() -> None:
     assert seen["mid"] == 42 and seen["order"] == "most_viewed"
     assert payload["author"] == "老何"
     assert payload["author_url"] == "https://space.bilibili.com/42"
+    assert payload["total"] == 497
     assert payload["videos"].startswith(
         "videos[1]{title,url,published_at,duration_sec,view_count,danmaku_count,"
         "comment_count}:"

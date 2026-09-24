@@ -117,6 +117,7 @@ class SuggestResult(BaseModel):
 class UpVideosResult(BaseModel):
     author: str | None
     author_url: str
+    total: int
     count: int
     videos: str
     has_more: bool
@@ -488,15 +489,18 @@ def create_server(
             Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。"),
         ] = None,
     ) -> UpVideosResult:
-        """列出 UP 主的投稿视频，每批 40 条。
+        """列出 UP 主的投稿视频，每批 40 条。total 是视频总数，带 keyword 时为匹配数。
 
         (uploader videos, channel uploads, other videos by this author)
         """
         mid = resolve_up(author_url)
-        author, page = _client().get_up_videos(mid, cursor=cursor, order=order, keyword=keyword)
+        author, total, page = _client().get_up_videos(
+            mid, cursor=cursor, order=order, keyword=keyword
+        )
         return UpVideosResult(
             author=author,
             author_url=f"https://space.bilibili.com/{mid}",
+            total=total,
             count=len(page.items),
             videos=to_toon("videos", page.items, UpVideoItem),
             has_more=page.has_more,

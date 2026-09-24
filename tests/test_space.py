@@ -59,8 +59,9 @@ def _fetch(client: _Client, **kw: Any):
 
 
 def test_maps_fields_and_author() -> None:
-    author, page = _fetch(_Client([_raw(1)], total=75))
+    author, total, page = _fetch(_Client([_raw(1)], total=75))
     assert author == "老何"
+    assert total == 75
     item = page.items[0]
     assert item.title == "t1"
     assert item.url == "https://www.bilibili.com/video/BV1"
@@ -73,18 +74,18 @@ def test_author_ignores_union_videos_by_others() -> None:
     """联合投稿的署名是别人，昵称要从本人投稿里取。"""
     union = {**_raw(0), "author": "特效小哥studio", "mid": 3066511}
     own = {**_raw(1), "mid": MID}
-    author, _ = _fetch(_Client([union, own], total=2))
+    author, _, _ = _fetch(_Client([union, own], total=2))
     assert author == "老何"
 
 
 def test_page_without_own_videos_has_no_author() -> None:
     union = {**_raw(0), "author": "特效小哥studio", "mid": 3066511}
-    author, page = _fetch(_Client([union], total=1))
+    author, _, page = _fetch(_Client([union], total=1))
     assert author is None and len(page.items) == 1
 
 
 def test_no_videos_means_no_author() -> None:
-    author, page = _fetch(_Client([], total=0))
+    author, _, page = _fetch(_Client([], total=0))
     assert author is None
     assert page.items == [] and not page.has_more
 
@@ -113,11 +114,11 @@ def test_keyword_sent_only_when_given() -> None:
 
 def test_cursor_counts_pages_and_stops_at_total() -> None:
     client = _Client([_raw(i) for i in range(40)], total=75)
-    _, first = _fetch(client)
+    _, _, first = _fetch(client)
     assert client.calls[0][0]["pn"] == 1
     assert first.has_more and first.next_cursor == "1"
     client.vlist = [_raw(i) for i in range(40, 75)]
-    _, last = _fetch(client, cursor=first.next_cursor)
+    _, _, last = _fetch(client, cursor=first.next_cursor)
     assert client.calls[1][0]["pn"] == 2
     assert not last.has_more and last.next_cursor is None
 

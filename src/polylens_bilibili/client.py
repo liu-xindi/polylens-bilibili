@@ -230,7 +230,7 @@ class BilibiliClient:
         cursor: str | None = None,
         order: str = "newest",
         keyword: str | None = None,
-    ) -> tuple[str | None, Page[UpVideoItem]]:
+    ) -> tuple[str | None, int, Page[UpVideoItem]]:
         return fetch_up_videos(self._http, mid, cursor=cursor, order=order, keyword=keyword)
 
     def get_up_info(self, mid: int) -> UpInfo:

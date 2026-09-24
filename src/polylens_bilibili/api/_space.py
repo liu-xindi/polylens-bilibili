@@ -39,8 +39,10 @@ def fetch_up_videos(
     cursor: str | None = None,
     order: str = "newest",
     keyword: str | None = None,
-) -> tuple[str | None, Page[UpVideoItem]]:
-    """取 UP 主的一页投稿，返回 (UP 主昵称, 这一页 + 续取状态)。
+) -> tuple[str | None, int, Page[UpVideoItem]]:
+    """取 UP 主的一页投稿，返回 (UP 主昵称, 视频总数, 这一页 + 续取状态)。
+
+    总数只数视频，不含图文；带 keyword 时是匹配的条数。
 
     昵称取自本人投稿的条目：接口不单独给，这一页没有本人投稿时就是 None。
     """
@@ -60,7 +62,8 @@ def fetch_up_videos(
     except _RateLimited:
         raise RateLimitedError("取 UP 主投稿触发风控，稍后重试。") from None
     vlist = data["list"]["vlist"] or []
-    has_more = (pages_taken + 1) * PAGE_SIZE < data["page"]["count"] and len(vlist) > 0
+    total = data["page"]["count"]
+    has_more = (pages_taken + 1) * PAGE_SIZE < total and len(vlist) > 0
     page = Page(
         items=[_to_item(raw) for raw in vlist],
         has_more=has_more,
@@ -68,4 +71,4 @@ def fetch_up_videos(
     )
     # 列表里混有别人署名的联合投稿，昵称只从本人投稿里取
     author = next((raw.get("author") for raw in vlist if raw.get("mid") == mid), None)
-    return author, page
+    return author, total, page
