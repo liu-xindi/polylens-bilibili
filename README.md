@@ -17,8 +17,8 @@
 | `get_danmaku` | 弹幕，按热度取一批，按时间轴返回 | 否 |
 | `get_subtitles` | 字幕，逐句，含起止秒数，可指定语种 | 是 |
 | `get_frame` | 截取指定时刻一帧，返回内联图片 | 是 |
-| `get_login_status` | 联网核验本地凭据是否仍然有效 | — |
-| `logout` | 删除本地 Cookie | — |
+| `get_login_status` | 联网查询当前是否已登录B站 | — |
+| `logout` | 退出登录 | — |
 | `start_qr_login` · `complete_qr_login` | 扫码登录 | — |
 
 ## 安装

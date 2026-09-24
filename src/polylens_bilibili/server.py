@@ -264,7 +264,6 @@ def create_server(
             Field(
                 description=(
                     "想要的主评论条数，实际返回可能多于或少于这个数。"
-                    "置顶评论排在第一页最前。"
                 )
             ),
         ],
@@ -273,8 +272,8 @@ def create_server(
             Literal["hot", "newest"],
             Field(
                 description=(
-                    "排序方式：hot 是平台的综合排序，newest 按时间倒序。"
-                    "两者的游标性质也不同：hot 的游标绑在一次翻页过程上，中断后无法从原处接续，"
+                    "排序方式：hot 是平台的综合排序。"
+                    "hot 的游标绑在一次翻页过程上，中断后无法从原处接续，"
                     "重复用同一个游标会继续往后走；newest 的游标是位置标识，可以重复取到同一批。"
                 )
             ),
@@ -313,7 +312,6 @@ def create_server(
         withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
         parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
         parent_id 指向的回复不在列表里时，那条被平台隐藏了，取不到。
-        正文开头「回复 @名字」里的名字可能与被回复者当前的 author 不同，以 parent_id 为准。
 
         (comment replies, sub-replies, thread)
         """
@@ -369,17 +367,13 @@ def create_server(
             str | None,
             Field(
                 description=(
-                    "轨道语种，如 zh-CN、en-US、ai-zh。不传则取平台给的第一条，"
-                    "而各段的轨道构成可能不同，要跨段拿同一语种就显式指定。"
+                    "轨道语种，如 zh-CN、en-US、ai-zh。不传则取平台给的第一条。"
                     "可选值见返回的 available_langs。"
                 )
             ),
         ] = None,
     ) -> SubtitlesResult:
         """获取视频字幕，逐句返回。需要登录。字幕可能为 AI 生成或机器翻译，存在误差。
-
-        多段视频常只有一部分分段有字幕，与该段时长无关；没有的那些返回空表、
-        lang 为 null、available_langs 为空。
 
         (subtitles, captions, transcript)
         """
@@ -509,8 +503,6 @@ def create_server(
     def get_feed() -> FeedResult:
         """刷 B 站首页推荐流，每批最多 30 条。
 
-        登录后按账号口味推，未登录给通用推荐。
-
         (homepage feed, recommendations, browse)
         """
         items = _client().get_feed()
@@ -518,7 +510,7 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:
-        """查询当前是否已登录（联网核验本地凭据是否仍然有效）。
+        """联网查询当前是否已登录B站。
 
         is_login 为 null 表示无法验证，与 false 不同。
 
@@ -528,7 +520,7 @@ def create_server(
 
     @mcp.tool(annotations=_LOCAL_ONLY)
     def logout() -> LogoutResult:
-        """退出登录，删除本地保存的 Cookie。(log out, sign out)"""
+        """退出登录。(log out, sign out)"""
         deleted = delete_cookie()
         return LogoutResult(
             deleted=deleted,
@@ -538,7 +530,7 @@ def create_server(
     # structured_output=False 同 get_frame：二维码内联返回，不进结构化通道。
     @mcp.tool(structured_output=False, annotations=_READS_PLATFORM)
     def start_qr_login() -> list[ImageContent | TextContent]:
-        """发起扫码登录，返回内联二维码图片。只发码，立即返回，不轮询。(QR code login)"""
+        """发起扫码登录，返回内联二维码图片。(QR code login)"""
         session = BilibiliClient().start_qr_login()
         meta = {
             "key": session.key,
@@ -553,7 +545,7 @@ def create_server(
     def complete_qr_login(
         key: Annotated[str, Field(description="start_qr_login 返回的 key。")],
     ) -> QrCheckResult:
-        """查询扫码结果，已确认则取回凭据并写入本地，登录即刻生效。
+        """取回凭据并写入本地。
 
         (finish QR code login, poll QR status)
         """
