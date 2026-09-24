@@ -23,6 +23,7 @@ from .api._signing import fetch_nav
 from .api._space import fetch_up_videos
 from .api._subtitles import SubtitleTrack, fetch_subtitles
 from .api._suggest import fetch_suggest
+from .api._up import fetch_up_info
 from .api._video import build_video_info, cid_for_page, clip_duration, fetch_view, list_parts
 from .errors import BilibiliError
 from .models import (
@@ -34,6 +35,7 @@ from .models import (
     QrLoginSession,
     ReplyThread,
     SearchItem,
+    UpInfo,
     UpVideoItem,
     VideoInfo,
     VideoPart,
@@ -230,6 +232,9 @@ class BilibiliClient:
         keyword: str | None = None,
     ) -> tuple[str | None, Page[UpVideoItem]]:
         return fetch_up_videos(self._http, mid, cursor=cursor, order=order, keyword=keyword)
+
+    def get_up_info(self, mid: int) -> UpInfo:
+        return fetch_up_info(self._http, mid)
 
     def get_feed(self) -> list[FeedItem]:
         return fetch_feed(self._http)

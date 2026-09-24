@@ -23,6 +23,7 @@ ENDPOINTS: dict[str, str] = {
     "search_type": "/x/web-interface/wbi/search/type",
     "suggest": "/x/web-interface/suggest",
     "space_videos": "/x/space/wbi/arc/search",
+    "up_card": "/x/web-interface/card",
     "feed_rcmd": "/x/web-interface/wbi/index/top/feed/rcmd",
 }
 

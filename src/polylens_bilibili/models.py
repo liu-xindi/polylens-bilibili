@@ -253,3 +253,23 @@ class VideoInfo(BaseModel):
     category_id: int | None = None
     current_page: int | None = None            # 仅多段视频有值
     current_part: str | None = None            # 仅多段视频有值
+
+
+class UpInfo(BaseModel):
+    """UP 主资料。字段恒在，无值为 null。字段口径写在 server.py 的工具 description 里。"""
+
+    mid: int
+    author: str | None = None
+    author_url: str | None = None
+    sign: str | None = None
+    sex: str | None = None
+    level: int | None = None
+    follower_count: int | None = None
+    following_count: int | None = None
+    video_count: int | None = None
+    article_count: int | None = None
+    like_count: int | None = None
+    official_type: str | None = None
+    official_title: str | None = None
+    vip: str | None = None
+    face_url: str | None = None

@@ -28,6 +28,7 @@ from .models import (
     QrStatus,
     SearchItem,
     SubtitleEntry,
+    UpInfo,
     UpVideoItem,
     VideoInfo,
     VideoPart,
@@ -120,6 +121,10 @@ class UpVideosResult(BaseModel):
     videos: str
     has_more: bool
     next_cursor: str | None = None
+    elapsed_s: float | None = None
+
+
+class UpInfoResult(UpInfo):
     elapsed_s: float | None = None
 
 
@@ -497,6 +502,20 @@ def create_server(
             has_more=page.has_more,
             next_cursor=page.next_cursor,
         )
+
+    @mcp.tool(annotations=_READS_PLATFORM)
+    @_timed
+    def get_up_info(
+        author_url: Annotated[
+            str, Field(description="UP 主空间链接（其他工具返回的 author_url），或数字 mid。")
+        ],
+    ) -> UpInfoResult:
+        """获取 UP 主资料：昵称、签名、等级、粉丝数、关注数、投稿数、总获赞、认证、大会员等。
+
+        (uploader profile, channel info, followers)
+        """
+        info = _client().get_up_info(resolve_up(author_url))
+        return UpInfoResult(**info.model_dump())
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed

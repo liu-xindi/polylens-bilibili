@@ -24,6 +24,7 @@ from polylens_bilibili.models import (
     ReplyThread,
     SearchItem,
     SubtitleEntry,
+    UpInfo,
     UpVideoItem,
     VideoInfo,
     VideoPart,
@@ -32,7 +33,8 @@ from polylens_bilibili.models import (
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 _TOOL_NAMES = {
     "get_video_info", "get_parts", "get_comments", "get_comment_replies", "get_danmaku",
-    "get_subtitles", "get_frame", "search_videos", "suggest_keywords", "list_up_videos", "get_feed",
+    "get_subtitles", "get_frame", "search_videos", "suggest_keywords", "list_up_videos",
+    "get_up_info", "get_feed",
     "get_login_status", "logout", "start_qr_login", "complete_qr_login",
 }
 
@@ -458,6 +460,22 @@ def test_list_up_videos_resolves_link_and_returns_toon() -> None:
         "comment_count}:"
     )
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
+
+
+def test_get_up_info_resolves_link() -> None:
+    seen: list[int] = []
+
+    def get_up_info(mid: int) -> UpInfo:
+        seen.append(mid)
+        return UpInfo(mid=mid, author="老何", follower_count=0)
+
+    with _with_client(get_up_info=get_up_info):
+        payload = _payload("get_up_info", {"author_url": "https://space.bilibili.com/42"})
+    assert seen == [42]
+    assert payload["author"] == "老何"
+    assert payload["follower_count"] == 0
+    assert payload["vip"] is None
+    assert payload["elapsed_s"] >= 0
 
 
 # ── 首页推荐 ────────────────────────────────────────────────────────────────
