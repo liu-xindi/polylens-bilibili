@@ -43,6 +43,8 @@ def _to_feed_item(raw: Any) -> FeedItem | None:
         published_at=_epoch_s_to_local(raw.get("pubdate")),
         duration_sec=_duration_seconds(raw.get("duration")),
         view_count=_int_or_none(stat.get("view")),
+        danmaku_count=_int_or_none(stat.get("danmaku")),
+        like_count=_int_or_none(stat.get("like")),
         rcmd_reason=(raw.get("rcmd_reason") or {}).get("content") or None,
     )
 

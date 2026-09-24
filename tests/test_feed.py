@@ -32,7 +32,7 @@ def _video(bvid: str = "BV1xx", **kw: Any) -> dict[str, Any]:  # noqa: D103
     base: dict[str, Any] = {
         "goto": "av", "bvid": bvid, "title": "标题",
         "owner": {"name": "up主", "mid": 42}, "pubdate": 1700000000, "duration": 225,
-        "stat": {"view": 1234, "danmaku": 5},
+        "stat": {"view": 1234, "like": 67, "danmaku": 5},
         "rcmd_reason": {"reason_type": 0},
     }
     return base | kw
@@ -58,6 +58,8 @@ def test_maps_fields() -> None:
     assert item.author_url == "https://space.bilibili.com/42"
     assert item.duration_sec == 225.0
     assert item.view_count == 1234
+    assert item.danmaku_count == 5
+    assert item.like_count == 67
     assert item.published_at == "2023-11-15 06:13"
 
 

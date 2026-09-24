@@ -140,7 +140,7 @@ def test_get_video_info_returns_named_fields() -> None:
 
 def _comment(cid: str, content: str, **kw: Any) -> Comment:
     base = Comment(
-        id=cid, author="u", content=content, like_count=0, reply_count=0,
+        id=cid, author="u", author_level=None, content=content, like_count=0, reply_count=0,
         parent_id=None, created_at=None, is_top=False, up_liked=False,
         image_urls=None, link_titles=None,
     )
@@ -156,7 +156,7 @@ def test_get_comments_returns_toon_and_paging() -> None:
     assert payload["has_more"] is True
     assert payload["next_cursor"] == "tok"
     assert payload["comments"].startswith(
-        "comments[2]{id,author,content,like_count,reply_count,parent_id,created_at,"
+        "comments[2]{id,author,author_level,content,like_count,reply_count,parent_id,created_at,"
         "is_top,up_liked,image_urls,link_titles}:"
     )
 
@@ -485,16 +485,18 @@ def test_get_feed_returns_toon() -> None:
     items = [
         FeedItem(title="t1", url="u1", author="甲", author_url="s1",
                  published_at="2026-08-17 10:00",
-                 duration_sec=225.0, view_count=1234, rcmd_reason="1万点赞"),
+                 duration_sec=225.0, view_count=1234, danmaku_count=5, like_count=67,
+                 rcmd_reason="1万点赞"),
         FeedItem(title="t2", url="u2", author=None, author_url=None, published_at=None,
-                 duration_sec=None, view_count=None, rcmd_reason=None),
+                 duration_sec=None, view_count=None, danmaku_count=None, like_count=None,
+                 rcmd_reason=None),
     ]
     with _with_client(get_feed=items):
         payload = _payload("get_feed")
     assert payload["count"] == 2
     assert payload["feed"].startswith(
         "feed[2]{title,url,author,author_url,published_at,duration_sec,view_count,"
-        "rcmd_reason}:"
+        "danmaku_count,like_count,rcmd_reason}:"
     )
     assert "1万点赞" in payload["feed"]
     assert payload["elapsed_s"] >= 0

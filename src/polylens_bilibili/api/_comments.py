@@ -13,6 +13,7 @@ from ..errors import AuthRequiredError, BilibiliError, RateLimitedError
 from ..models import Comment, Page, ReplyThread, to_local_time
 from ._constants import ENDPOINTS, REPLY_PAGE_SIZE
 from ._http import HttpClient, _RateLimited
+from ._search import _int_or_none
 from ._signing import fetch_nav, sign_params
 
 _MAIN_PAGE_DELAY = 0.2  # 主评论翻页间隔（抗风控）
@@ -62,6 +63,7 @@ def _normalize_reply(reply: dict[str, Any], *, root_id: int | None = None) -> Co
     return Comment(
         id=str(rpid),
         author=member.get("uname", ""),
+        author_level=_int_or_none((member.get("level_info") or {}).get("current_level")),
         content=content_field.get("message", ""),
         like_count=reply.get("like", 0),
         reply_count=reply.get("count", 0),

@@ -132,6 +132,7 @@ class Comment:
 
     id: str
     author: str
+    author_level: int | None  # 评论者的账号等级 0~6
     content: str
     like_count: int
     reply_count: int
@@ -178,6 +179,8 @@ class FeedItem:
     published_at: str | None  # 本机时区可读时间
     duration_sec: float | None  # 时长秒数
     view_count: int | None
+    danmaku_count: int | None
+    like_count: int | None
     rcmd_reason: str | None  # 平台给的推荐理由，多数条目没有
 
 

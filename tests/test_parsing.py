@@ -387,6 +387,15 @@ def test_normalize_reply_flags_default_to_false():
     assert c.image_urls is None and c.link_titles is None
 
 
+def test_normalize_reply_reads_author_level():
+    c = _normalize_reply(_reply(member={"uname": "u", "level_info": {"current_level": 6}}))
+    assert c.author_level == 6
+
+
+def test_normalize_reply_author_level_missing_is_none():
+    assert _normalize_reply(_reply()).author_level is None
+
+
 def test_normalize_reply_reads_top_and_up_liked():
     c = _normalize_reply(
         _reply(reply_control={"is_up_top": True}, up_action={"like": True, "reply": False})
