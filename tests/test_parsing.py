@@ -115,6 +115,29 @@ def test_build_video_info_category_and_duration():
     assert info.category_id == 17
 
 
+def test_build_video_info_copyright():
+    assert build_video_info(_view(copyright=1))[0].copyright == "自制"
+    assert build_video_info(_view(copyright=2))[0].copyright == "转载"
+    assert build_video_info(_view())[0].copyright is None
+
+
+def test_build_video_info_staff_for_union_video():
+    view = _view(staff=[
+        {"mid": 42, "title": "UP主", "name": "甲"},
+        {"mid": 43, "title": "剪辑", "name": "乙"},
+    ])
+    staff = build_video_info(view)[0].staff
+    assert staff is not None
+    assert [(m.name, m.role, m.author_url) for m in staff] == [
+        ("甲", "UP主", "https://space.bilibili.com/42"),
+        ("乙", "剪辑", "https://space.bilibili.com/43"),
+    ]
+
+
+def test_build_video_info_staff_absent_is_none():
+    assert build_video_info(_view())[0].staff is None
+
+
 def test_build_video_info_single_part_has_no_part_fields():
     """单段视频不给分段字段。"""
     info, _, _ = build_video_info(_view())
@@ -394,6 +417,27 @@ def test_normalize_reply_reads_author_level():
 
 def test_normalize_reply_author_level_missing_is_none():
     assert _normalize_reply(_reply()).author_level is None
+
+
+def test_normalize_reply_author_url_from_string_mid():
+    c = _normalize_reply(_reply(member={"uname": "u", "mid": "320773657"}))
+    assert c.author_url == "https://space.bilibili.com/320773657"
+
+
+def test_normalize_reply_is_up_compares_string_mid_with_upper():
+    c = _normalize_reply(_reply(member={"uname": "u", "mid": "42"}), upper_mid=42)
+    assert c.is_up is True
+    assert _normalize_reply(_reply(), upper_mid=42).is_up is False
+    assert _normalize_reply(_reply()).is_up is False
+
+
+def test_normalize_reply_ip_location_strips_prefix():
+    c = _normalize_reply(_reply(reply_control={"location": "IP属地：湖北"}))
+    assert c.ip_location == "湖北"
+
+
+def test_normalize_reply_ip_location_missing_is_none():
+    assert _normalize_reply(_reply(reply_control={})).ip_location is None
 
 
 def test_normalize_reply_reads_top_and_up_liked():

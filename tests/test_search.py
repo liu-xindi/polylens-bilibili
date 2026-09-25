@@ -27,7 +27,8 @@ def test_to_search_item_maps_fields() -> None:
     raw = {
         "title": '<em class="keyword">py</em>入门', "bvid": "BV1xx", "author": "up主", "mid": 42,
         "play": 12345, "danmaku": 67, "favorites": 89, "duration": "10:00",
-        "pubdate": 1700000000,
+        "pubdate": 1700000000, "typename": "动漫杂谈", "tag": "原神,派蒙",
+        "description": "简介", "review": 8343, "like": 88913,
     }
     item = search_mod._to_search_item(raw)
     assert item is not None
@@ -38,6 +39,11 @@ def test_to_search_item_maps_fields() -> None:
     assert item.view_count == 12345
     assert item.danmaku_count == 67
     assert item.favorite_count == 89
+    assert item.comment_count == 8343
+    assert item.like_count == 88913
+    assert item.category == "动漫杂谈"
+    assert item.tags == "原神,派蒙"
+    assert item.summary == "简介"
     assert item.duration_sec == 600.0
     assert item.published_at is not None  # pubdate 转本机时区可读串
 

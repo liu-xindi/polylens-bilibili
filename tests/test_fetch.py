@@ -41,10 +41,10 @@ _SIGN_PATCH_SUB = patch(
 _SLEEP_PATCH = patch("polylens_bilibili.api._comments.time.sleep")
 
 
-def _reply(rpid: int, content: str, *, parent: int = 0, count: int = 0) -> dict:
+def _reply(rpid: int, content: str, *, parent: int = 0, count: int = 0, mid: int = 1) -> dict:
     return {
         "rpid": rpid, "parent": parent,
-        "member": {"uname": "u", "mid": 1},
+        "member": {"uname": "u", "mid": str(mid)},
         "content": {"message": content},
         "like": 0, "count": count, "ctime": 0,
     }
@@ -68,6 +68,16 @@ def test_fetch_comments_top_replies_inserted_first():
         page = fetch_comments(client, aid=100, count=20)
     assert [c.content for c in page.items] == ["top", "normal"]
     assert page.has_more is False and page.next_cursor is None  # 单页 is_end → 抓全
+
+
+def test_fetch_comments_marks_up_from_upper():
+    client = MagicMock()
+    client.get_json.return_value = _page(
+        [_reply(2, "up", mid=42), _reply(3, "fan")], top_replies=[_reply(1, "top", mid=42)]
+    ) | {"upper": {"mid": 42}}
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        page = fetch_comments(client, aid=100, count=20)
+    assert [c.is_up for c in page.items] == [True, True, False]
 
 
 def test_fetch_comments_empty_replies_returns_empty():
@@ -209,6 +219,16 @@ def _sub_page(endpoint, params):
     ps, pn = params["ps"], params["pn"]
     base = (pn - 1) * ps
     return {"replies": [_reply(base + i + 1, f"r{base + i}") for i in range(ps)]}
+
+
+def test_fetch_replies_marks_up_from_upper():
+    client = MagicMock()
+    client.get_json.return_value = {
+        "replies": [_reply(1, "up", mid=42), _reply(2, "fan")], "upper": {"mid": 42},
+    }
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        out = fetch_replies(client, 100, ["555"])
+    assert [c.is_up for c in out[0].page.items] == [True, False]
 
 
 def test_fetch_replies_slices_window_by_limit():

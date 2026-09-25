@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..errors import BilibiliError
-from ..models import VideoInfo, VideoPart, space_url, to_local_time
+from ..models import StaffMember, VideoInfo, VideoPart, space_url, to_local_time
 from ._constants import ENDPOINTS
 from ._http import HttpClient
 
@@ -67,6 +67,25 @@ def _summary_of(view: dict[str, Any]) -> str | None:
     return text or None
 
 
+_COPYRIGHT = {1: "自制", 2: "转载"}
+
+
+def _staff_of(view: dict[str, Any]) -> list[StaffMember] | None:
+    """联合投稿的成员；非联合投稿平台不给 staff，返回 None。"""
+    staff = view.get("staff")
+    if not isinstance(staff, list) or not staff:
+        return None
+    return [
+        StaffMember(
+            name=m.get("name") or None,
+            role=m.get("title") or None,
+            author_url=space_url(m.get("mid")),
+        )
+        for m in staff
+        if isinstance(m, dict)
+    ]
+
+
 def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, int, int]:
     """从 view 数据构造 VideoInfo，同时返回 aid 和当前段 cid（供后续能力使用）。
 
@@ -95,6 +114,8 @@ def build_video_info(view: dict[str, Any], page: int = 1) -> tuple[VideoInfo, in
         url=f"https://www.bilibili.com/video/{bvid}/",
         published_at=to_local_time(view.get("pubdate")),
         summary=_summary_of(view),
+        copyright=_COPYRIGHT.get(view.get("copyright")),  # type: ignore[arg-type]
+        staff=_staff_of(view),
         duration_sec=float(duration) if duration else None,
         # 顶层 duration 是整片时长（实测等于各段之和），多段分支里被换成了分段时长，这里补回。
         total_duration_sec=_float_or_none(view.get("duration")),

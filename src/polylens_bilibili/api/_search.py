@@ -113,8 +113,13 @@ def _to_search_item(raw: Any) -> SearchItem | None:
         author_url=space_url(raw.get("mid")),
         published_at=_epoch_s_to_local(raw.get("pubdate")),
         duration_sec=_duration_seconds(raw.get("duration")),
+        category=raw.get("typename") or None,
+        tags=raw.get("tag") or None,
+        summary=raw.get("description") or None,
         view_count=_int_or_none(raw.get("play")),
         danmaku_count=_int_or_none(raw.get("danmaku")),
+        comment_count=_int_or_none(raw.get("review")),
+        like_count=_int_or_none(raw.get("like")),
         favorite_count=_int_or_none(raw.get("favorites")),
     )
 

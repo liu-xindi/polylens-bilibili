@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from ..errors import AuthRequiredError, BilibiliError, RateLimitedError
-from ..models import Comment, Page, ReplyThread, to_local_time
+from ..models import Comment, Page, ReplyThread, space_url, to_local_time
 from ._constants import ENDPOINTS, REPLY_PAGE_SIZE
 from ._http import HttpClient, _RateLimited
 from ._search import _int_or_none
@@ -50,7 +50,20 @@ def _link_titles(content: dict[str, Any]) -> str | None:
     ])
 
 
-def _normalize_reply(reply: dict[str, Any], *, root_id: int | None = None) -> Comment:
+def _ip_location(reply: dict[str, Any]) -> str | None:
+    text = (reply.get("reply_control") or {}).get("location")
+    if not isinstance(text, str):
+        return None
+    return text.removeprefix("IP属地：").strip() or None
+
+
+def _upper_mid(data: dict[str, Any]) -> int | None:
+    return _int_or_none((data.get("upper") or {}).get("mid"))
+
+
+def _normalize_reply(
+    reply: dict[str, Any], *, root_id: int | None = None, upper_mid: int | None = None
+) -> Comment:
     rpid = reply.get("rpid")
     if not rpid:
         # 这个 id 是 get_comment_replies 的入参，给空串会让钻取失败在更远的地方。
@@ -60,10 +73,15 @@ def _normalize_reply(reply: dict[str, Any], *, root_id: int | None = None) -> Co
     # parent 指向被回复的那条；等于本楼楼主（root_id）时置空：楼层嵌套已表达，只在"互回"时保留。
     parent = reply.get("parent")
     parent_id = str(parent) if parent and parent != root_id else None
+    # member.mid 是字符串，upper.mid 是整数
+    mid = _int_or_none(member.get("mid"))
     return Comment(
         id=str(rpid),
         author=member.get("uname", ""),
+        author_url=space_url(mid),
         author_level=_int_or_none((member.get("level_info") or {}).get("current_level")),
+        is_up=mid is not None and mid == upper_mid,
+        ip_location=_ip_location(reply),
         content=content_field.get("message", ""),
         like_count=reply.get("like", 0),
         reply_count=reply.get("count", 0),
@@ -97,6 +115,7 @@ def _fetch_thread(
     collected: list[dict[str, Any]] = []
     reached_end = False
     withheld = 0
+    upper_mid: int | None = None
     while limit is None or len(collected) < limit:
         data = client.get_json(
             ENDPOINTS["replies_sub"],
@@ -104,6 +123,7 @@ def _fetch_thread(
         ) or {}
         page = data.get("replies") or []
         withheld = _withheld_count(data)
+        upper_mid = _upper_mid(data)
         collected.extend(page)
         if len(page) < REPLY_PAGE_SIZE:
             reached_end = True
@@ -111,7 +131,9 @@ def _fetch_thread(
         pn += 1
         time.sleep(_REPLY_PAGE_DELAY)
     window = collected if limit is None else collected[:limit]
-    replies = [_normalize_reply(raw, root_id=root_id) for raw in window]
+    replies = [
+        _normalize_reply(raw, root_id=root_id, upper_mid=upper_mid) for raw in window
+    ]
     has_more = len(window) < len(collected) or not reached_end
     return Page(items=replies, has_more=has_more), withheld
 
@@ -204,12 +226,13 @@ def fetch_comments(
             if not replies:
                 offset = None
                 break
+            upper_mid = _upper_mid(data)
             if first_page:
                 first_page = False
                 for raw in data.get("top_replies") or []:
-                    comments.append(_normalize_reply(raw))
+                    comments.append(_normalize_reply(raw, upper_mid=upper_mid))
             for raw in replies:
-                comments.append(_normalize_reply(raw))
+                comments.append(_normalize_reply(raw, upper_mid=upper_mid))
             cur = data.get("cursor") or {}
             if cur.get("is_end"):
                 offset = None

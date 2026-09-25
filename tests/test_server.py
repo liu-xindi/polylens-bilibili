@@ -140,7 +140,8 @@ def test_get_video_info_returns_named_fields() -> None:
 
 def _comment(cid: str, content: str, **kw: Any) -> Comment:
     base = Comment(
-        id=cid, author="u", author_level=None, content=content, like_count=0, reply_count=0,
+        id=cid, author="u", author_url=None, author_level=None, is_up=False,
+        ip_location=None, content=content, like_count=0, reply_count=0,
         parent_id=None, created_at=None, is_top=False, up_liked=False,
         image_urls=None, link_titles=None,
     )
@@ -156,8 +157,8 @@ def test_get_comments_returns_toon_and_paging() -> None:
     assert payload["has_more"] is True
     assert payload["next_cursor"] == "tok"
     assert payload["comments"].startswith(
-        "comments[2]{id,author,author_level,content,like_count,reply_count,parent_id,created_at,"
-        "is_top,up_liked,image_urls,link_titles}:"
+        "comments[2]{id,author,author_url,author_level,is_up,ip_location,content,like_count,"
+        "reply_count,parent_id,created_at,is_top,up_liked,image_urls,link_titles}:"
     )
 
 
@@ -246,7 +247,8 @@ def test_search_returns_toon_and_paging() -> None:
     page = Page(
         items=[
             SearchItem(title="t1", url="u1", author=None, author_url=None, published_at=None,
-                       duration_sec=None, view_count=9, danmaku_count=None,
+                       duration_sec=None, category=None, tags=None, summary=None,
+                       view_count=9, danmaku_count=None, comment_count=None, like_count=None,
                        favorite_count=None)
         ],
         has_more=True,
@@ -257,8 +259,8 @@ def test_search_returns_toon_and_paging() -> None:
     assert payload["count"] == 1
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
     assert payload["results"].startswith(
-        "results[1]{title,url,author,author_url,published_at,duration_sec,view_count,"
-        "danmaku_count,favorite_count}:"
+        "results[1]{title,url,author,author_url,published_at,duration_sec,category,tags,summary,"
+        "view_count,danmaku_count,comment_count,like_count,favorite_count}:"
     )
 
 

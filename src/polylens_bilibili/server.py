@@ -447,7 +447,8 @@ def create_server(
     ) -> SearchResult:
         """按关键词搜索 B 站视频，每批最多 30 条。
 
-        结果已滤掉付费课程，一批可能不满 30 条。
+        结果已滤掉付费课程，一批可能不满 30 条。summary 是平台截断过的简介，
+        完整简介用 get_video_info 取。
 
         (search videos, find video by keyword)
         """

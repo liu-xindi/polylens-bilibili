@@ -132,7 +132,10 @@ class Comment:
 
     id: str
     author: str
+    author_url: str | None  # 评论者空间链接，可传给 get_up_info / list_up_videos
     author_level: int | None  # 评论者的账号等级 0~6
+    is_up: bool  # 评论者是该视频的 UP 主本人
+    ip_location: str | None  # IP 属地（省份或国家）；较早的评论平台不给
     content: str
     like_count: int
     reply_count: int
@@ -163,8 +166,13 @@ class SearchItem:
     author_url: str | None  # UP 主空间链接，可传给 list_up_videos
     published_at: str | None  # 本机时区可读时间
     duration_sec: float | None  # 时长秒数（平台给的是"总分钟:秒"文本，已换算）
+    category: str | None  # 分区名
+    tags: str | None  # 标签，逗号分隔
+    summary: str | None  # 简介，平台截断在约 250 字
     view_count: int | None
     danmaku_count: int | None
+    comment_count: int | None
+    like_count: int | None
     favorite_count: int | None
 
 
@@ -228,6 +236,12 @@ class Danmaku:
     heat: int
 
 
+class StaffMember(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    author_url: str | None = None
+
+
 class VideoInfo(BaseModel):
     """视频元信息。字段恒在，无值为 null。
 
@@ -242,6 +256,8 @@ class VideoInfo(BaseModel):
     url: str | None = None
     published_at: str | None = None
     summary: str | None = None
+    copyright: str | None = None               # 自制 / 转载
+    staff: list[StaffMember] | None = None     # 仅联合投稿有值
     duration_sec: float | None = None          # 多段视频为当前段
     total_duration_sec: float | None = None    # 多段视频为全部分段之和
     view_count: int | None = None

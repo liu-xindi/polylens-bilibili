@@ -91,7 +91,8 @@ def test_toon_bool_is_lowercase_literal() -> None:
 
 def _comment(**kw: Any) -> Comment:
     base = Comment(
-        id="1", author="u", author_level=None, content="hi", like_count=0, reply_count=0,
+        id="1", author="u", author_url=None, author_level=None, is_up=False,
+        ip_location=None, content="hi", like_count=0, reply_count=0,
         parent_id=None, created_at=None, is_top=False, up_liked=False,
         image_urls=None, link_titles=None,
     )
@@ -102,9 +103,9 @@ def test_comments_toon_columns_are_fixed() -> None:
     """列固定，与本批数据无关；计数为 0 照常写出，id 为数字串加引号，布尔写成字面量。"""
     out = to_toon("comments", [_comment()], Comment)
     expect = (
-        "comments[1]{id,author,author_level,content,like_count,reply_count,parent_id,created_at,"
-        "is_top,up_liked,image_urls,link_titles}:\n"
-        '  "1",u,,hi,0,0,,,false,false,,'
+        "comments[1]{id,author,author_url,author_level,is_up,ip_location,content,like_count,"
+        "reply_count,parent_id,created_at,is_top,up_liked,image_urls,link_titles}:\n"
+        '  "1",u,,,false,,hi,0,0,,,false,false,,'
     )
     assert out == expect
 
@@ -149,18 +150,21 @@ def test_search_items_toon_columns_are_fixed() -> None:
         "results",
         [
             SearchItem(title="t1", url="u1", author="甲", author_url="s1", published_at=None,
-                       duration_sec=None, view_count=9, danmaku_count=None, favorite_count=3),
+                       duration_sec=None, category="知识", tags=None, summary=None,
+                       view_count=9, danmaku_count=None, comment_count=None, like_count=None,
+                       favorite_count=3),
             SearchItem(title="t2", url="u2", author=None, author_url=None, published_at=None,
-                       duration_sec=None, view_count=None, danmaku_count=None,
-                       favorite_count=None),
+                       duration_sec=None, category=None, tags=None, summary=None,
+                       view_count=None, danmaku_count=None, comment_count=None,
+                       like_count=None, favorite_count=None),
         ],
         SearchItem,
     )
     assert out == (
-        "results[2]{title,url,author,author_url,published_at,duration_sec,view_count,"
-        "danmaku_count,favorite_count}:\n"
-        "  t1,u1,甲,s1,,,9,,3\n"
-        "  t2,u2,,,,,,,"
+        "results[2]{title,url,author,author_url,published_at,duration_sec,category,tags,summary,"
+        "view_count,danmaku_count,comment_count,like_count,favorite_count}:\n"
+        "  t1,u1,甲,s1,,,知识,,,9,,,,3\n"
+        "  t2,u2,,,,,,,,,,,,"
     )
 
 
@@ -186,6 +190,7 @@ def test_video_info_keeps_all_fields_including_none_and_zero() -> None:
     assert d["view_count"] == 0
     assert d["author"] is None
     assert set(d) == {"id", "title", "author", "author_url", "url", "published_at", "summary",
+                      "copyright", "staff",
                       "duration_sec", "total_duration_sec", "view_count", "danmaku_count_total",
                       "comment_count",
                       "like_count", "favorite_count", "share_count", "coin_count",
