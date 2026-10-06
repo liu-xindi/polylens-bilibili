@@ -102,6 +102,7 @@ class ReplyThreadItem(BaseModel):
     jq_count: int | None = None
     has_more: bool
     withheld: int = 0
+    error: str | None = None
 
 
 class CommentRepliesResult(BaseModel):
@@ -307,7 +308,8 @@ def create_server(
             int,
             Field(
                 description=(
-                    "想要的主评论条数，实际返回可能多于或少于这个数。"
+                    "想要的主评论条数。平台每页约 20 条，按整页取，"
+                    "实际返回可能多于或少于这个数。"
                 )
             ),
         ],
@@ -375,6 +377,7 @@ def create_server(
         """回复按时间正序排列。需要登录。
 
         withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
+        某个楼取不到（评论不存在、不属于这个视频）时只在该楼的 error 里说明，其他楼照常返回。
         parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
         parent_id 指向的回复不在列表里时，那条被平台隐藏了，取不到。
 
@@ -394,6 +397,7 @@ def create_server(
                     jq_count=jq_count,
                     has_more=t.page.has_more,
                     withheld=t.withheld,
+                    error=t.error,
                 )
             )
         return CommentRepliesResult(video_id=video_id, results=results)
@@ -518,7 +522,7 @@ def create_server(
             Field(description=_jq_desc(SearchItem, paged=True)),
         ] = None,
     ) -> SearchResult:
-        """每批最多 30 条。
+        """每批最多 30 条，最多翻 30 批。
 
         结果已滤掉付费课程，一批可能不满 30 条。summary 是平台截断过的简介，
         完整简介通过 get_video_info 获取。

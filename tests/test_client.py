@@ -287,6 +287,35 @@ def test_short_link_without_cookie_sends_no_cookie_header(
     assert "Cookie" not in seen["headers"]
 
 
+@pytest.mark.parametrize(
+    "text", ["b23.tv/abcdef", "【标题】 b23.tv/abcdef 附言", "bili2233.cn/abcdef"]
+)
+def test_short_link_without_scheme(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+    seen: dict[str, Any] = {}
+
+    def _fake(req, timeout=20):
+        seen["url"] = req.full_url
+        return _Resp(BV_URL)
+
+    monkeypatch.setattr(client_mod, "urlopen", _fake)
+    assert resolve_video(text) == ("BV1xx411c7mD", 1)
+    assert seen["url"].startswith("https://") and seen["url"].endswith("/abcdef")
+
+
+def test_bare_host_inside_longer_domain_is_not_a_short_link() -> None:
+    with pytest.raises(BilibiliError, match="无法从输入解析"):
+        resolve_video("notb23.tv/abcdef")
+
+
+def test_dead_short_link_is_reported_as_such(monkeypatch: pytest.MonkeyPatch) -> None:
+    """失效短链不跳转，平台直接回 200，展开后还是短链本身。"""
+    monkeypatch.setattr(
+        client_mod, "urlopen", lambda req, timeout=20: _Resp("https://b23.tv/zzzzzzz")
+    )
+    with pytest.raises(BilibiliError, match="短链无效或已失效"):
+        resolve_video("https://b23.tv/zzzzzzz")
+
+
 def test_non_short_link_never_goes_online(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(req, timeout=20):
         raise AssertionError("不该联网")

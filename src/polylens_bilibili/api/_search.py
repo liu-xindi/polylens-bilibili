@@ -12,7 +12,7 @@ from typing import Any
 
 from ..errors import BilibiliError, RateLimitedError
 from ..models import Page, SearchItem, space_url, to_local_time
-from ._constants import ENDPOINTS, SEARCH_PAGE_SIZE, SEARCH_REFERER, SEARCH_RESULT_CAP
+from ._constants import ENDPOINTS, SEARCH_PAGE_CAP, SEARCH_PAGE_SIZE, SEARCH_REFERER
 from ._http import HttpClient, _RateLimited
 from ._signing import fetch_nav, sign_params
 
@@ -141,6 +141,8 @@ def fetch_search(
     if not query:
         raise BilibiliError("搜索关键词不能为空")
     pages_taken = _parse_offset(cursor)
+    if pages_taken >= SEARCH_PAGE_CAP:
+        return Page(items=[])
     nav = fetch_nav(client)
     params = {
         "search_type": "video", "keyword": query, "page": pages_taken + 1,
@@ -166,10 +168,18 @@ def fetch_search(
         # 它可切片可迭代, 逐字符都会被条目级的 isinstance 挡掉, 整页悄悄变空而游标照走。
         # 判在兜空值之前: "" 与 {} 也是形状变了, 不是"没有结果"。缺 result 才是没有结果。
         raise BilibiliError(f"搜索响应的 result 不是列表, 而是 {type(result).__name__}")
+    # 页码越过总页数时平台不给空页，而是回显最后一页的页码并返回那一页
+    echoed_page = (data or {}).get("page")
+    if isinstance(echoed_page, int) and echoed_page != pages_taken + 1:
+        return Page(items=[])
     raw_items = result or []
     items = [item for raw in raw_items if (item := _to_search_item(raw)) is not None]
-    # 平台结果封顶 1000 条
-    has_more = (pages_taken + 1) * SEARCH_PAGE_SIZE < SEARCH_RESULT_CAP and len(raw_items) > 0
+    num_pages = (data or {}).get("numPages")
+    has_more = (
+        pages_taken + 1 < SEARCH_PAGE_CAP
+        and len(raw_items) > 0
+        and (not isinstance(num_pages, int) or pages_taken + 1 < num_pages)
+    )
     return Page(
         items=items, has_more=has_more, next_cursor=str(pages_taken + 1) if has_more else None
     )

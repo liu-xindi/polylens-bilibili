@@ -134,19 +134,43 @@ def test_default_order_is_relevance(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.calls[0]["order"] == "totalrank"
 
 
-def test_stops_at_result_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """第 34 页覆盖到第 1020 条，已越过结果上限（1000）→ has_more=false，即使本页有数据。"""
-    client = _stub(monkeypatch, [_raw(i) for i in range(990, 1000)])
-    page = _fetch(client, cursor="33")
-    assert client.calls[0]["page"] == 34
+def test_stops_at_page_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """第 30 页是最后一页 → has_more=false，即使本页有数据。"""
+    client = _stub(monkeypatch, [_raw(i) for i in range(870, 900)])
+    page = _fetch(client, cursor="29")
+    assert client.calls[0]["page"] == 30
     assert page.has_more is False
     assert page.next_cursor is None
 
 
 def test_page_before_cap_still_has_more(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _stub(monkeypatch, [_raw(i) for i in range(960, 990)])
-    page = _fetch(client, cursor="32")  # 第 33 页止于第 990 条
-    assert page.has_more is True and page.next_cursor == "33"
+    client = _stub(monkeypatch, [_raw(i) for i in range(840, 870)])
+    page = _fetch(client, cursor="28")
+    assert page.has_more is True and page.next_cursor == "29"
+
+
+@pytest.mark.parametrize("cursor", ["30", "99999"])
+def test_cursor_beyond_cap_is_empty_without_request(
+    monkeypatch: pytest.MonkeyPatch, cursor: str
+) -> None:
+    client = _stub(monkeypatch, [_raw(0)])
+    page = _fetch(client, cursor=cursor)
+    assert page.items == [] and page.has_more is False
+    assert client.calls == []
+
+
+def test_clamped_page_echo_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """总页数不足时平台把页码夹回最后一页并返回它，不能当成本页数据。"""
+    client = _stub(monkeypatch, [_raw(i) for i in range(10)], page=3, numPages=3)
+    page = _fetch(client, cursor="9")
+    assert page.items == [] and page.has_more is False
+
+
+def test_last_page_by_num_pages_has_no_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _stub(monkeypatch, [_raw(i) for i in range(10)], page=3, numPages=3)
+    page = _fetch(client, cursor="2")
+    assert len(page.items) == 10
+    assert page.has_more is False and page.next_cursor is None
 
 
 def test_stops_on_empty_page(monkeypatch: pytest.MonkeyPatch) -> None:

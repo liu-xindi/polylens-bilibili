@@ -197,6 +197,16 @@ def test_get_comment_replies_groups_by_thread() -> None:
     assert "reply_count" not in results[0]["replies"]
 
 
+def test_get_comment_replies_surfaces_thread_error() -> None:
+    threads = [
+        ReplyThread("1", Page(items=[_comment("11", "x")])),
+        ReplyThread("2", Page(items=[]), error="接口返回失败: 12006 没有该评论"),
+    ]
+    with _with_client(get_comment_replies=threads):
+        payload = _payload("get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"]})
+    assert [r["error"] for r in payload["results"]] == [None, "接口返回失败: 12006 没有该评论"]
+
+
 def test_get_comment_replies_surfaces_withheld() -> None:
     """平台扣下的回复条数逐楼给出，让调用方知道引用链可能断在哪。"""
     threads = [

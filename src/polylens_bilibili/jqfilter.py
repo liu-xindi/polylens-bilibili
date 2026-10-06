@@ -2,6 +2,7 @@
 
 表达式在子进程里执行：libjq 在进程内无法被打断，死循环与内存膨胀只能靠杀进程兜底。
 用 forkserver 而非直接 fork 服务进程，避开多线程进程里 fork 的隐患。
+forkserver 起子进程时会重新导入主模块，嵌入本服务的脚本须有 if __name__ == "__main__" 保护。
 """
 
 from __future__ import annotations

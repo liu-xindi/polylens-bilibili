@@ -161,6 +161,7 @@ class ReplyThread:
     comment_id: str
     page: Page[Comment]
     withheld: int = 0  # 平台声称有、却不肯列出的回复条数（见 _comments._withheld_count）
+    error: str | None = None  # 这个楼取不到时的原因，此时 page 为空
 
 
 @dataclass(slots=True)

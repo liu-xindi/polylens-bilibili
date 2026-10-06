@@ -47,6 +47,10 @@ _PAGE_RE = re.compile(r"[?&]p=(\d+)")
 _SPACE_RE = re.compile(r"space\.bilibili\.com/(\d+)")
 # 只收 RFC 3986 允许的字符：分享文案里链接后面常紧跟中文，按空格切会把它们吃进来
 _URL_RE = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
+# 不带协议头的短链，如 b23.tv/xxxx；前面不能紧跟域名字符，免得截到更长域名的尾巴
+_BARE_SHORT_RE = re.compile(
+    r"(?<![\w.\-/])(?:" + "|".join(map(re.escape, sorted(SHORT_LINK_HOSTS))) + r")/[A-Za-z0-9]+"
+)
 
 
 def _find_short_link(text: str) -> str | None:
@@ -59,6 +63,8 @@ def _find_short_link(text: str) -> str | None:
         link = match.group(0).rstrip(".,;:!?")  # 句末标点不属于链接
         if urlparse(link).netloc in SHORT_LINK_HOSTS:
             return link
+    if bare := _BARE_SHORT_RE.search(text):
+        return "https://" + bare.group(0)
     return None
 
 
@@ -76,7 +82,7 @@ def _expand_short_link(text: str, cookie: str = "", timeout: int = 20) -> str:
         headers["Cookie"] = cookie.strip()
     try:
         with urlopen(Request(link, headers=headers), timeout=timeout) as resp:  # noqa: S310
-            return resp.geturl()
+            expanded = resp.geturl()
     except (HTTPError, URLError) as exc:
         hint = (
             "改用完整视频链接（含 BV 号）后重试。"
@@ -84,6 +90,10 @@ def _expand_short_link(text: str, cookie: str = "", timeout: int = 20) -> str:
             else "本服务的出口地址可能被平台限制；登录后重试，或改用完整视频链接（含 BV 号）。"
         )
         raise BilibiliError(f"短链解析失败，无法展开 {link}；{hint}") from exc
+    # 失效的短链不跳转，平台直接回 200
+    if urlparse(expanded).netloc in SHORT_LINK_HOSTS:
+        raise BilibiliError(f"短链无效或已失效：{link}")
+    return expanded
 
 
 def _extract_video_id(text: str) -> str:

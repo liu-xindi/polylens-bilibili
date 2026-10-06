@@ -24,6 +24,8 @@ from polylens_bilibili.errors import AuthRequiredError, BilibiliError, RateLimit
 
 _PLATFORM_PAGE = 20  # 平台的主评论单页条数，测试里用来拼"满页"
 
+_PLATFORM_CURSOR = "CAESEDE4MzQyNzYxNTEwNTEyMzAaADIECPnBAQ=="  # 实测平台发出的游标
+
 _LOGGED_IN = NavInfo("imgkey", "subkey", True)
 _ANONYMOUS = NavInfo("imgkey", "subkey", False)
 
@@ -190,7 +192,7 @@ def test_fetch_comments_cursor_skips_top_replies():
         [_reply(1, "r")], is_end=True, top_replies=[_reply(9, "top")]
     )
     with _nav_patch("_comments"), _SIGN_PATCH:
-        page = fetch_comments(client, aid=100, cursor="TOKEN", count=20)
+        page = fetch_comments(client, aid=100, cursor=_PLATFORM_CURSOR, count=20)
     assert [c.content for c in page.items] == ["r"]
 
 
@@ -362,6 +364,49 @@ def test_fetch_replies_requires_login():
         with pytest.raises(AuthRequiredError):
             fetch_replies(client, 100, ["1"], limit=5)
     client.get_json.assert_not_called()
+
+
+@pytest.mark.parametrize("bad", ["not-a-cursor", "TOKEN", "===="])
+def test_fetch_comments_rejects_unparsable_cursor(bad: str):
+    """平台不校验游标，乱写的会被当成从头开始，只能在本地拦。"""
+    client = MagicMock()
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        with pytest.raises(BilibiliError, match="无法识别的续取游标"):
+            fetch_comments(client, aid=100, cursor=bad, count=20)
+    client.get_json.assert_not_called()
+
+
+def test_fetch_replies_rejects_non_numeric_ids():
+    client = MagicMock()
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        with pytest.raises(BilibiliError, match="comment_ids 需为数字 id，收到 abc"):
+            fetch_replies(client, 100, ["1", "abc"])
+    client.get_json.assert_not_called()
+
+
+def test_fetch_replies_rejects_comment_of_another_video():
+    """平台按 root 定位楼层，不校验 oid；响应里 root.oid 才是评论真正所属的视频。"""
+    client = MagicMock()
+    client.get_json.return_value = {"replies": [_reply(1, "r")], "root": {"oid": 999}}
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        out = fetch_replies(client, 100, ["555"])
+    assert out[0].page.items == []
+    assert out[0].error is not None and "不属于这个视频" in out[0].error
+
+
+def test_fetch_replies_isolates_failing_thread():
+    def _get(endpoint, params):
+        if params["root"] == 1:
+            raise BilibiliHttpError("接口返回失败: 12006 没有该评论")
+        return {"replies": [_reply(7, "ok")], "root": {"oid": 100}}
+
+    client = MagicMock()
+    client.get_json.side_effect = _get
+    with _nav_patch("_comments"), _SLEEP_PATCH:
+        out = fetch_replies(client, 100, ["555", "1"])
+    assert [t.comment_id for t in out] == ["555", "1"]
+    assert [c.content for c in out[0].page.items] == ["ok"] and out[0].error is None
+    assert out[1].page.items == [] and out[1].error is not None and "12006" in out[1].error
 
 
 def test_fetch_replies_rate_limited_raises():

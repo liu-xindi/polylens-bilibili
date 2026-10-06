@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import time
 from typing import Any
@@ -121,6 +123,10 @@ def _fetch_thread(
             ENDPOINTS["replies_sub"],
             {"oid": aid, "type": 1, "root": root_id, "ps": REPLY_PAGE_SIZE, "pn": pn},
         ) or {}
+        owner = (data.get("root") or {}).get("oid")
+        if isinstance(owner, int) and owner != aid:
+            # 平台按 root 定位楼层，不校验 oid：别的视频的评论 id 照样返回数据
+            raise BilibiliError(f"评论 {root_id} 不属于这个视频")
         page = data.get("replies") or []
         withheld = _withheld_count(data)
         upper_mid = _upper_mid(data)
@@ -148,21 +154,43 @@ def fetch_replies(
     """按 comment_id 钻取楼中楼。limit 是每楼只取前多少条；不传则取到楼底。
 
     内部串行（防风控）；中途触发风控则抛 RateLimitedError，不返回半程结果。
+    单个楼取不到（评论不存在、不属于这个视频）只记在该楼的 error 上，不连累其他楼。
     楼中楼接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
     """
     if limit is not None and limit < 1:
         raise BilibiliError(f"limit 需为正整数，收到 {limit}")
+    bad = [cid for cid in comment_ids if not cid.isdigit()]
+    if bad:
+        raise BilibiliError(f"comment_ids 需为数字 id，收到 {'、'.join(bad)}")
     if not fetch_nav(client).is_login:
         raise AuthRequiredError("comment_replies")
     results: list[ReplyThread] = []
     try:
         for cid in comment_ids:
-            page, withheld = _fetch_thread(client, aid, int(cid), limit)
-            results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
+            try:
+                page, withheld = _fetch_thread(client, aid, int(cid), limit)
+                results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
+            except BilibiliError as e:
+                results.append(ReplyThread(comment_id=cid, page=Page(items=[]), error=str(e)))
             time.sleep(_AFTER_THREAD_DELAY)
     except _RateLimited:
         raise RateLimitedError("楼中楼抓取触发风控，稍后重试。") from None
     return results
+
+
+def _check_cursor(cursor: str) -> None:
+    """平台不校验游标，乱写的游标会被当成从头开始，静默重复抓取。
+
+    平台发出的游标都是 base64，解不开的必定不是它发的；能解开的伪造游标仍拦不住。
+    """
+    try:
+        decoded = base64.b64decode(cursor, validate=True)
+    except (binascii.Error, ValueError):
+        decoded = b""
+    if not decoded:
+        raise BilibiliError(
+            f"无法识别的续取游标: {cursor!r}；请原样回传上次返回的 next_cursor"
+        )
 
 
 #: 对外的排序名 → 平台的 mode 编码。平台在 cursor.support_mode 里声明支持这两种。
@@ -213,6 +241,8 @@ def fetch_comments(
         raise BilibiliError(f"count 需为正整数，收到 {count}")
     if sort not in _SORT_MODE:
         raise BilibiliError(f"未知的排序方式 {sort!r}，可选：{'、'.join(_SORT_MODE)}")
+    if cursor:
+        _check_cursor(cursor)
     mode = _SORT_MODE[sort]
     nav = fetch_nav(client)
     if not nav.is_login:

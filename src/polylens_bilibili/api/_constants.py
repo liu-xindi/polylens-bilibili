@@ -27,8 +27,8 @@ ENDPOINTS: dict[str, str] = {
     "feed_rcmd": "/x/web-interface/wbi/index/top/feed/rcmd",
 }
 
-# 搜索结果总数封顶（前端翻页亦止于此）。
-SEARCH_RESULT_CAP = 1000
+# 搜索最多翻到第几页。平台结果封顶 1000 条（34 页），再往后的页码会被夹回最后一页。
+SEARCH_PAGE_CAP = 30
 SEARCH_PAGE_SIZE = 30
 
 # 首页推荐单次条数，平台封顶 30。
