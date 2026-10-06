@@ -49,8 +49,9 @@ class _RateLimited(Exception):
     """内部信号：触发风控。由各能力捕获后转成 RateLimitedError。
 
     signal 是平台给的原始信号：HTTP 状态 412 / 429，业务码 -352 / -509，或 v_voucher
-    （code=0 而 data 里只有挑战票据）。各信号的含义与持续多久没有一一验证过，原样带进
-    文案与日志，不替平台解释。已知的只有 429：几秒到几十秒就恢复。
+    （code=0 而 data 里只有挑战票据），原样带进文案与日志。只有 412 实测过会持续封禁
+    （评论接口按账号封约 15 分钟）；429 几秒就恢复，v_voucher 随机出现，-352 / -509 未观察到，
+    都按可直接重试报。
     """
 
     def __init__(self, signal: str, path: str, retry_in: float | None = None) -> None:
@@ -68,9 +69,9 @@ class _RateLimited(Exception):
                 f"评论接口触发风控（{self.signal}），约 {_minutes(self.retry_in)} 分钟后再试，"
                 "期间重试或重新登录都无效。"
             )
-        if self.signal == "429":
-            return f"{what}被平台限流（429），几秒后可重试。"
-        return f"{what}触发风控（{self.signal}），稍后重试。"
+        if self.signal == _BLOCKING_SIGNAL:
+            return f"{what}触发风控（{self.signal}），稍后重试。"
+        return f"{what}触发风控（{self.signal}），可直接重试。"
 
     def describe_partial(self, what: str) -> str:
         """中途被拦、已有部分结果时的说明。"""
@@ -79,16 +80,18 @@ class _RateLimited(Exception):
                 f"评论接口触发风控（{self.signal}），只取到部分，"
                 f"约 {_minutes(self.retry_in)} 分钟后用 next_cursor 续取。"
             )
-        if self.signal == "429":
-            return f"{what}被平台限流（429），只取到部分，几秒后用 next_cursor 续取。"
-        return f"{what}触发风控（{self.signal}），只取到部分，稍后用 next_cursor 续取。"
+        if self.signal == _BLOCKING_SIGNAL:
+            return f"{what}触发风控（{self.signal}），只取到部分，稍后用 next_cursor 续取。"
+        return f"{what}触发风控（{self.signal}），只取到部分，可直接用 next_cursor 续取。"
 
 
 def _minutes(seconds: float) -> int:
     return max(1, math.ceil(seconds / 60))
 
 
+_BLOCKING_SIGNAL = "412"
 _COMMENT_INTERVAL = 1.0
+_PAGES_PER_MINUTE = 20
 _COOLDOWN = 900.0
 _RECHECK = 120.0
 
@@ -96,12 +99,13 @@ _RECHECK = 120.0
 class _CommentGuard:
     """评论组的节流与熔断，进程内共享：http 部署下所有会话共用一份。
 
-    节流：相邻两次评论请求的发出时刻至少隔 _COMMENT_INTERVAL 秒，跨调用、跨会话都算。
-    1 秒没有实测依据，取的是不拖慢平时用量的值；几分钟内取几十页的情形照样会触发风控，由熔断处理。
+    节流：相邻两次评论请求的发出时刻至少隔 _COMMENT_INTERVAL 秒，且任意 60 秒内不超过
+    _PAGES_PER_MINUTE 次，跨调用、跨会话都算。两次实测都是每秒一页、约 50 页时被拦；
+    每分钟 20 页约为真人快速扫读的速度，统计窗口未知，这个值没有验证过。
 
-    熔断：评论组收到 429 以外的风控信号即停用 _COOLDOWN 秒，期间不发请求。风控按账号算：
-    换排序、换视频、重新登录、换出口 IP 都不通，实测约 15 分钟后恢复（10-07 为 14.6–15.2 分钟）。
-    到期放行一个请求试探，仍被拦则每隔 _RECHECK 秒再试一次。429 几秒就恢复，不熔断。
+    熔断：评论组收到 412 即停用 _COOLDOWN 秒，期间不发请求。风控按账号算：换排序、换视频、
+    重新登录、换出口 IP 都不通，实测约 15 分钟后恢复（10-07 为 14.6–15.2 分钟）。到期放行
+    一个请求试探，仍被拦则每隔 _RECHECK 秒再试一次。其他信号不熔断。
     """
 
     def __init__(
@@ -113,6 +117,7 @@ class _CommentGuard:
         self._sleep = sleep
         self._lock = threading.Lock()
         self._last_start: float | None = None
+        self._starts: deque[float] = deque(maxlen=_PAGES_PER_MINUTE)
         self._blocked_until = 0.0  # 非 0 表示熔断过、尚未确认恢复
         self._signal = ""
         self._probing = False
@@ -133,11 +138,15 @@ class _CommentGuard:
             if self._blocked_until:
                 self._probing = True
                 _log.warning("评论接口熔断到期，放行一个请求试探")
+            wait = 0.0
             if self._last_start is not None:
                 wait = self._last_start + _COMMENT_INTERVAL - now
-                if wait > 0:
-                    self._sleep(wait)
+            if len(self._starts) == _PAGES_PER_MINUTE:
+                wait = max(wait, self._starts[0] + 60 - now)
+            if wait > 0:
+                self._sleep(wait)
             self._last_start = self._clock()
+            self._starts.append(self._last_start)
 
     def reached(self) -> None:
         """平台正常作答（含业务错误码），说明没被拦。"""
@@ -151,7 +160,7 @@ class _CommentGuard:
         """请求失败。signal 为 None 表示与风控无关（网络等）。返回熔断剩余秒数，未熔断为 None。"""
         with self._lock:
             probing, self._probing = self._probing, False
-            if signal is None or signal == "429":
+            if signal != _BLOCKING_SIGNAL:
                 return None
             duration = _RECHECK if probing else _COOLDOWN
             self._signal = signal

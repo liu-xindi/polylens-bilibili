@@ -215,7 +215,7 @@ def test_fetch_comments_rate_limited_midway_returns_partial():
     with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=40)
     assert [c.content for c in page.items] == ["a"]
-    assert page.rate_limited == "评论触发风控（-352），只取到部分，稍后用 next_cursor 续取。"
+    assert page.rate_limited == "评论触发风控（-352），只取到部分，可直接用 next_cursor 续取。"
     assert page.has_more is True and page.next_cursor == "SESSION"
 
 
@@ -428,7 +428,7 @@ def test_fetch_replies_interrupted_keeps_finished_threads():
         out = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
     assert [t.comment_id for t in out] == ["1", "2", "3"]
     assert [c.content for c in out[0].page.items] == ["a"] and out[0].error is None
-    assert out[1].error == out[2].error == "二级评论抓取被平台限流（429），几秒后可重试。"
+    assert out[1].error == out[2].error == "二级评论抓取触发风控（429），可直接重试。"
     assert client.get_json.call_count == 2  # 被拦后不再请求后面的
 
 
@@ -605,9 +605,11 @@ def test_get_json_raises_rate_limited_on_risk_codes(code: int):
 
 
 def test_rate_limited_message_carries_signal():
-    """429 几秒到几十秒就恢复（导出的调用记录里 3 次，重试都成功），文案与其他信号分开。"""
-    assert _RateLimited("429", "/x").describe("搜索") == "搜索被平台限流（429），几秒后可重试。"
-    assert _RateLimited("-352", "/x").describe("搜索") == "搜索触发风控（-352），稍后重试。"
+    """只有 412 实测过持续封禁，其余信号按可直接重试报。"""
+    assert _RateLimited("412", "/x").describe("搜索") == "搜索触发风控（412），稍后重试。"
+    for signal in ("429", "-352", "-509", "v_voucher"):
+        expected = f"搜索触发风控（{signal}），可直接重试。"
+        assert _RateLimited(signal, "/x").describe("搜索") == expected
     assert "412" in str(_RateLimited("412", "/x"))  # 没被能力接住时直接报出的那句
 
 
@@ -946,7 +948,9 @@ def test_fetch_comments_rejects_unknown_sort():
 _MAIN = "/x/v2/reply/wbi/main"
 _SUB = "/x/v2/reply/reply"
 _OK = json.dumps({"code": 0, "data": {}}).encode()
-_BLOCKED = json.dumps({"code": -352}).encode()
+_BLOCKED = urllib.error.HTTPError(
+    url="", code=412, msg="", hdrs=http.client.HTTPMessage(), fp=None
+)
 
 
 class _Clock:
@@ -971,7 +975,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     return c
 
 
-def _answer(client: HttpClient, *bodies: bytes) -> Any:
+def _answer(client: HttpClient, *bodies: bytes | Exception) -> Any:
     return patch.object(client, "get_bytes", side_effect=list(bodies))
 
 
@@ -1006,9 +1010,9 @@ def test_block_signal_opens_breaker_without_further_requests(clock: _Clock):
         with pytest.raises(_RateLimited) as later:
             client.get_json(_SUB)
     assert sent.call_count == 1
-    assert later.value.signal == "-352"
+    assert later.value.signal == "412"
     assert later.value.describe("评论") == (
-        "评论接口触发风控（-352），约 5 分钟后再试，期间重试或重新登录都无效。"
+        "评论接口触发风控（412），约 5 分钟后再试，期间重试或重新登录都无效。"
     )
 
 
@@ -1068,16 +1072,30 @@ def test_business_error_counts_as_reached(clock: _Clock):
         client.get_json(_MAIN)
 
 
-def test_429_does_not_open_breaker(clock: _Clock):
-    """429 几秒到几十秒就恢复，熔断 10 分钟得不偿失。"""
+@pytest.mark.parametrize("answer", [
+    urllib.error.HTTPError(url="", code=429, msg="", hdrs=http.client.HTTPMessage(), fp=None),
+    json.dumps({"code": -352}).encode(),
+    json.dumps({"code": -509}).encode(),
+    json.dumps({"code": 0, "data": {"v_voucher": "x"}}).encode(),
+])
+def test_only_412_opens_breaker(clock: _Clock, answer: Any):
+    """只有 412 实测过持续封禁；其余信号熔断 15 分钟得不偿失，按可直接重试报。"""
     client = _http()
-    hdrs = http.client.HTTPMessage()
-    exc = urllib.error.HTTPError(url="", code=429, msg="", hdrs=hdrs, fp=None)
-    with _answer(client, exc, _OK):  # type: ignore[arg-type]
+    with _answer(client, answer, _OK):
         with pytest.raises(_RateLimited) as info:
             client.get_json(_SUB)
         assert info.value.retry_in is None
+        assert info.value.describe("评论").endswith("可直接重试。")
         client.get_json(_SUB)
+
+
+def test_comment_requests_capped_per_minute(clock: _Clock):
+    """任意 60 秒内最多 20 页：两次实测都是每秒一页、约 50 页时被拦。"""
+    client = _http()
+    with _answer(client, *[_OK] * 21):
+        for _ in range(21):
+            client.get_json(_MAIN)
+    assert clock.slept == [1.0] * 19 + [41.0]
 
 
 def test_partial_comments_carry_cooldown(clock: _Clock):
@@ -1088,7 +1106,7 @@ def test_partial_comments_carry_cooldown(clock: _Clock):
     with _nav_patch("_comments"), _SIGN_PATCH, _answer(client, first, _BLOCKED):
         page = fetch_comments(client, aid=100, count=40)
     assert page.rate_limited == (
-        "评论接口触发风控（-352），只取到部分，约 15 分钟后用 next_cursor 续取。"
+        "评论接口触发风控（412），只取到部分，约 15 分钟后用 next_cursor 续取。"
     )
     with pytest.raises(_RateLimited):
         client.get_json(_MAIN)

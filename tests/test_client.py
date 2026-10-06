@@ -347,7 +347,7 @@ def test_resolve_up_rejects_other_input() -> None:
 
 def test_comment_tools_refuse_while_breaker_open(comment_guard: Any) -> None:
     """熔断期间连取视频信息的请求也不发。"""
-    comment_guard.failed("-352")
+    comment_guard.failed("412")
     client = BilibiliClient()
     with patch("polylens_bilibili.client.fetch_view", side_effect=AssertionError("不该发请求")):
         with pytest.raises(RateLimitedError, match="约 15 分钟后再试"):
