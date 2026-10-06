@@ -34,7 +34,7 @@ SEARCH_PAGE_SIZE = 30
 # 首页推荐单次条数，平台封顶 30。
 FEED_PAGE_SIZE = 30
 
-# 楼中楼单页条数，平台封顶 20。
+# 二级评论单页条数，平台封顶 20。
 REPLY_PAGE_SIZE = 20
 
 # 截帧画质：720p。

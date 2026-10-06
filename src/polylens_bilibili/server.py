@@ -45,7 +45,7 @@ _PAGE_DESC = (
 )
 _CURSOR_DESC = "续取游标：不传从头开始，回传上次返回的 next_cursor 取下一批。"
 
-# 评论只有两层，楼中楼回复的 reply_count 恒为 0
+# 评论只有两层，二级评论的 reply_count 恒为 0
 _REPLY_EXCLUDE = frozenset({"reply_count"})
 
 
@@ -291,7 +291,7 @@ def create_server(
     ) -> VideoInfoResult:
         """含标题、作者、发布时间、简介与各项统计。
 
-        统计口径：评论数含楼中楼回复；弹幕数与整片时长是全部分段之和，
+        统计口径：评论数含二级评论；弹幕数与整片时长是全部分段之和，
         当前段时长只算这一段。
 
         (video info, metadata, stats)
@@ -333,7 +333,7 @@ def create_server(
             Field(description=_jq_desc(Comment, paged=True)),
         ] = None,
     ) -> CommentsResult:
-        """不含楼中楼，楼中楼通过 get_comment_replies 获取。需要登录。(video comments)"""
+        """不含二级评论，二级评论通过 get_comment_replies 获取。需要登录。(video comments)"""
         video_id, _ = _resolve(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
         comments, jq_count = encode_items("comments", page.items, Comment, jq)
@@ -361,7 +361,7 @@ def create_server(
             int | None,
             Field(
                 description=(
-                    "每个楼只取最早的多少条回复，has_more 表示被截断。不传则取完整个楼。"
+                    "每条主评论只取最早的多少条二级评论，has_more 表示被截断。不传则全部取完。"
                 )
             ),
         ] = None,
@@ -369,17 +369,17 @@ def create_server(
             str | None,
             Field(
                 description=_jq_desc(
-                    Comment, paged=False, scope="单个楼的回复", exclude=_REPLY_EXCLUDE
+                    Comment, paged=False, scope="单条主评论下的二级评论", exclude=_REPLY_EXCLUDE
                 )
             ),
         ] = None,
     ) -> CommentRepliesResult:
-        """回复按时间正序排列。需要登录。
+        """二级评论按时间正序排列。需要登录。
 
-        withheld 是整个楼里平台未列出的回复条数（已删除或被折叠），不随 limit 变化。
-        某个楼取不到（评论不存在、不属于这个视频）时只在该楼的 error 里说明，其他楼照常返回。
-        parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
-        parent_id 指向的回复不在列表里时，那条被平台隐藏了，取不到。
+        withheld 是该主评论下平台未列出的二级评论条数（已删除或被折叠），不随 limit 变化。
+        某条主评论取不到（评论不存在、不属于这个视频）时只在它的 error 里说明，其他照常返回。
+        parent_id 为空表示直接回复主评论，否则是所回复的那条二级评论的 id。
+        parent_id 指向的二级评论不在列表里时，那条被平台隐藏了，取不到。
 
         (comment replies, sub-replies, thread)
         """

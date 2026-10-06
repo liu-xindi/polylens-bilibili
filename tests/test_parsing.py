@@ -236,12 +236,12 @@ def test_normalize_reply_parent_id_none_when_zero():
 
 
 def test_normalize_reply_omits_parent_when_equals_root():
-    """parent 指向本楼楼主时置空，嵌套关系已经表达了这层。"""
+    """parent 指向所属主评论时置空，嵌套关系已经表达了这层。"""
     assert _normalize_reply(_reply(parent=555), root_id=555).parent_id is None
 
 
 def test_normalize_reply_keeps_parent_on_cross_reply():
-    """parent 指向另一条楼中楼时保留，这是嵌套推不出的"谁回复谁"。"""
+    """parent 指向另一条二级评论时保留，这是嵌套推不出的"谁回复谁"。"""
     assert _normalize_reply(_reply(parent=888), root_id=555).parent_id == "888"
 
 

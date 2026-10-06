@@ -208,7 +208,7 @@ def test_get_comment_replies_surfaces_thread_error() -> None:
 
 
 def test_get_comment_replies_surfaces_withheld() -> None:
-    """平台扣下的回复条数逐楼给出，让调用方知道引用链可能断在哪。"""
+    """平台扣下的回复条数按主评论逐条给出，让调用方知道引用链可能断在哪。"""
     threads = [
         ReplyThread("1", Page(items=[_comment("11", "x")], has_more=False), withheld=6),
         ReplyThread("2", Page(items=[], has_more=False)),

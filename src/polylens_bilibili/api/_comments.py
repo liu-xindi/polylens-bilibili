@@ -1,4 +1,4 @@
-"""评论：WBI 签名的主评论分页 + 楼中楼钻取。
+"""评论：WBI 签名的主评论分页 + 二级评论钻取。
 
 未登录时平台不报错，而是只给几条并声称已到底，故两处都在取数据前判登录态。
 """
@@ -19,8 +19,8 @@ from ._search import _int_or_none
 from ._signing import fetch_nav, sign_params
 
 _MAIN_PAGE_DELAY = 0.2  # 主评论翻页间隔（抗风控）
-_REPLY_PAGE_DELAY = 0.15  # 楼中楼翻页间隔
-_AFTER_THREAD_DELAY = 0.2  # 每抓完一楼之后
+_REPLY_PAGE_DELAY = 0.15  # 二级评论翻页间隔
+_AFTER_THREAD_DELAY = 0.2  # 每抓完一条主评论的回复之后
 
 
 def _joined(values: list[str]) -> str | None:
@@ -72,7 +72,7 @@ def _normalize_reply(
         raise BilibiliError("评论数据缺少 rpid，无法定位这条评论")
     member = reply.get("member") or {}
     content_field = reply.get("content") or {}
-    # parent 指向被回复的那条；等于本楼楼主（root_id）时置空：楼层嵌套已表达，只在"互回"时保留。
+    # parent 指向被回复的那条；等于所属主评论（root_id）时置空：嵌套已表达，只在"互回"时保留。
     parent = reply.get("parent")
     parent_id = str(parent) if parent and parent != root_id else None
     # member.mid 是字符串，upper.mid 是整数
@@ -112,7 +112,7 @@ def _withheld_count(data: dict[str, Any]) -> int:
 def _fetch_thread(
     client: HttpClient, aid: int, root_id: int, limit: int | None
 ) -> tuple[Page[Comment], int]:
-    """从头取某主评论楼中楼的前 limit 条；limit 为 None 时一直翻到楼底。"""
+    """从头取某主评论二级评论的前 limit 条；limit 为 None 时一直翻到最后一页。"""
     pn = 1
     collected: list[dict[str, Any]] = []
     reached_end = False
@@ -125,7 +125,7 @@ def _fetch_thread(
         ) or {}
         owner = (data.get("root") or {}).get("oid")
         if isinstance(owner, int) and owner != aid:
-            # 平台按 root 定位楼层，不校验 oid：别的视频的评论 id 照样返回数据
+            # 平台按 root 定位主评论，不校验 oid：别的视频的评论 id 照样返回数据
             raise BilibiliError(f"评论 {root_id} 不属于这个视频")
         page = data.get("replies") or []
         withheld = _withheld_count(data)
@@ -151,11 +151,11 @@ def fetch_replies(
     *,
     limit: int | None = None,
 ) -> list[ReplyThread]:
-    """按 comment_id 钻取楼中楼。limit 是每楼只取前多少条；不传则取到楼底。
+    """按 comment_id 钻取二级评论。limit 是每条主评论只取前多少条；不传则全部取完。
 
     内部串行（防风控）；中途触发风控则抛 RateLimitedError，不返回半程结果。
-    单个楼取不到（评论不存在、不属于这个视频）只记在该楼的 error 上，不连累其他楼。
-    楼中楼接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
+    单条主评论取不到（评论不存在、不属于这个视频）只记在它的 error 上，不影响其他。
+    二级评论接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
     """
     if limit is not None and limit < 1:
         raise BilibiliError(f"limit 需为正整数，收到 {limit}")
@@ -174,7 +174,7 @@ def fetch_replies(
                 results.append(ReplyThread(comment_id=cid, page=Page(items=[]), error=str(e)))
             time.sleep(_AFTER_THREAD_DELAY)
     except _RateLimited:
-        raise RateLimitedError("楼中楼抓取触发风控，稍后重试。") from None
+        raise RateLimitedError("二级评论抓取触发风控，稍后重试。") from None
     return results
 
 
@@ -220,7 +220,7 @@ def fetch_comments(
     cursor: str | None = None,
     sort: str = "hot",
 ) -> Page[Comment]:
-    """抓取视频主评论（纯主评论，不含楼中楼）。置顶评论插入列表最前面。
+    """抓取视频主评论（纯主评论，不含二级评论）。置顶评论插入列表最前面。
 
     cursor=None 从头；count 为想要条数的下限（实际可能略多，整页对齐以保 cursor 续取不丢）。
 

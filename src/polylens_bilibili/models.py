@@ -131,7 +131,7 @@ class Page[Item]:
 
 @dataclass(slots=True)
 class Comment:
-    """一条评论。楼中楼由 get_comment_replies 单独钻取，不内嵌于此。
+    """一条评论。二级评论由 get_comment_replies 单独钻取，不内嵌于此。
 
     content 是平台原文：评论里的配图与链接标题另立字段，不改写原文。
     """
@@ -146,7 +146,7 @@ class Comment:
     content: str
     like_count: int
     reply_count: int
-    parent_id: str | None  # 被回复的那条评论 id；仅楼中楼"互回"时出现（回楼主则为 None）
+    parent_id: str | None  # 被回复的那条评论 id；仅二级评论"互回"时出现（直接回复主评论则为 None）
     created_at: str | None = field(metadata=bulky())  # 本机时区可读时间（见 to_local_time）
     is_top: bool = field(metadata=bulky())  # 置顶评论
     up_liked: bool = field(metadata=bulky())  # UP 主给这条点过赞
@@ -156,12 +156,12 @@ class Comment:
 
 @dataclass(slots=True)
 class ReplyThread:
-    """对某条主评论钻取楼中楼的一次结果。comment_id 是分组键。"""
+    """对某条主评论钻取二级评论的一次结果。comment_id 是分组键。"""
 
     comment_id: str
     page: Page[Comment]
-    withheld: int = 0  # 平台声称有、却不肯列出的回复条数（见 _comments._withheld_count）
-    error: str | None = None  # 这个楼取不到时的原因，此时 page 为空
+    withheld: int = 0  # 平台声称有、却不肯列出的二级评论条数（见 _comments._withheld_count）
+    error: str | None = None  # 这条主评论取不到时的原因，此时 page 为空
 
 
 @dataclass(slots=True)
@@ -271,7 +271,7 @@ class VideoInfo(BaseModel):
     total_duration_sec: float | None = None    # 多段视频为全部分段之和
     view_count: int | None = None
     danmaku_count_total: int | None = None     # 多段视频为全部分段之和
-    comment_count: int | None = None           # 含楼中楼
+    comment_count: int | None = None           # 含二级评论
     like_count: int | None = None
     favorite_count: int | None = None
     share_count: int | None = None

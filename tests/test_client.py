@@ -135,7 +135,7 @@ def test_get_login_status_lets_unexpected_errors_surface() -> None:
 
 
 def test_comment_replies_with_empty_ids_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """没给 id 就没有楼可钻，返回空列表，不报错也不发请求。"""
+    """没给 id 就没有可取的回复，返回空列表，不报错也不发请求。"""
     called: list[int] = []
     monkeypatch.setattr(
         BilibiliClient, "_view", lambda self, vid: called.append(1) or {}  # type: ignore[func-returns-value]

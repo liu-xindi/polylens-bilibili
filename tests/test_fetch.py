@@ -298,7 +298,7 @@ def test_fetch_replies_without_limit_reads_whole_thread():
 
 
 def _make_sized_sub_page(sizes: dict[int, int]):
-    """按 root（=comment_id）给不同楼不同总回复数；rpid = root*1000+下标，跨楼唯一。"""
+    """按 root（=comment_id）给不同主评论不同总回复数；rpid = root*1000+下标，全局唯一。"""
 
     def _get(endpoint, params):
         root, ps, pn = params["root"], params["ps"], params["pn"]
@@ -314,7 +314,7 @@ def _make_sized_sub_page(sizes: dict[int, int]):
 
 
 def test_fetch_replies_limit_applies_per_thread():
-    """limit 对每个楼各自生效：没取完的楼标 has_more，一次到底的不标。"""
+    """limit 对每条主评论各自生效：没取完的标 has_more，一次到底的不标。"""
     client = MagicMock()
     client.get_json.side_effect = _make_sized_sub_page({1: 8, 2: 12, 3: 3})
     with _nav_patch("_comments"), _SLEEP_PATCH:
@@ -386,7 +386,7 @@ def test_fetch_replies_rejects_non_numeric_ids():
 
 
 def test_fetch_replies_rejects_comment_of_another_video():
-    """平台按 root 定位楼层，不校验 oid；响应里 root.oid 才是评论真正所属的视频。"""
+    """平台按 root 定位主评论，不校验 oid；响应里 root.oid 才是评论真正所属的视频。"""
     client = MagicMock()
     client.get_json.return_value = {"replies": [_reply(1, "r")], "root": {"oid": 999}}
     with _nav_patch("_comments"), _SLEEP_PATCH:
