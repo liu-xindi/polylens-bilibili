@@ -65,7 +65,7 @@ class _RateLimited(Exception):
     def describe(self, what: str) -> str:
         if self.retry_in is not None:
             return (
-                f"评论接口被风控（{self.signal}），约 {_minutes(self.retry_in)} 分钟后恢复，"
+                f"评论接口触发风控（{self.signal}），约 {_minutes(self.retry_in)} 分钟后再试，"
                 "期间重试或重新登录都无效。"
             )
         if self.signal == "429":
@@ -76,7 +76,7 @@ class _RateLimited(Exception):
         """中途被拦、已有部分结果时的说明。"""
         if self.retry_in is not None:
             return (
-                f"评论接口被风控（{self.signal}），只取到部分，"
+                f"评论接口触发风控（{self.signal}），只取到部分，"
                 f"约 {_minutes(self.retry_in)} 分钟后用 next_cursor 续取。"
             )
         if self.signal == "429":
@@ -96,14 +96,12 @@ _RECHECK = 300.0
 class _CommentGuard:
     """评论组的节流与熔断，进程内共享：http 部署下所有会话共用一份。
 
-    节流：相邻两次评论请求的发出时刻至少隔 _COMMENT_INTERVAL 秒。按发出时刻算，本身慢的
-    请求不再额外等。原先是各次调用内部翻页之间 sleep，调用与调用之间、同时到达的几个调用
-    之间仍是背靠背。1 秒没有实测依据，只是不拖慢平时用量（导出的记录里 3 分钟内最多十几页）；
-    10-06 那次几分钟内取了约五六十页被拦，按 1 秒照样会触发，挡那种情形靠熔断。
+    节流：相邻两次评论请求的发出时刻至少隔 _COMMENT_INTERVAL 秒，跨调用、跨会话都算。
+    1 秒没有实测依据，取的是不拖慢平时用量的值；几分钟内取几十页的情形照样会触发风控，由熔断处理。
 
-    熔断：评论组收到 429 以外的风控信号即停用 _COOLDOWN 秒，期间不发请求。10-06 实测：
-    被拦后换排序、换视频、重新登录都不通，约 7.5–15.5 分钟后恢复，继续请求只会白白失败。
-    到期放行一个请求试探，仍被拦再停 _RECHECK 秒。429 几秒就恢复，不熔断。
+    熔断：评论组收到 429 以外的风控信号即停用 _COOLDOWN 秒，期间不发请求。10-06 实测被拦后
+    换排序、换视频、重新登录都不通，约 7.5–15.5 分钟后恢复。到期放行一个请求试探，
+    仍被拦再停 _RECHECK 秒。429 几秒就恢复，不熔断。
     """
 
     def __init__(

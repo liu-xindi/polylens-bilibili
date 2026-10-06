@@ -996,7 +996,7 @@ def test_other_endpoints_not_throttled(clock: _Clock):
 
 
 def test_block_signal_opens_breaker_without_further_requests(clock: _Clock):
-    """被拦后换视频、换排序、重新登录都不通（10-06 实测），继续请求只会白白失败。"""
+    """被拦后换视频、换排序、重新登录都不通（10-06 实测），熔断期间不再发请求。"""
     client = _http()
     with _answer(client, _BLOCKED) as sent:
         with pytest.raises(_RateLimited) as first:
@@ -1008,7 +1008,7 @@ def test_block_signal_opens_breaker_without_further_requests(clock: _Clock):
     assert sent.call_count == 1
     assert later.value.signal == "-352"
     assert later.value.describe("评论") == (
-        "评论接口被风控（-352），约 5 分钟后恢复，期间重试或重新登录都无效。"
+        "评论接口触发风控（-352），约 5 分钟后再试，期间重试或重新登录都无效。"
     )
 
 
@@ -1070,7 +1070,7 @@ def test_partial_comments_carry_cooldown(clock: _Clock):
     with _nav_patch("_comments"), _SIGN_PATCH, _answer(client, first, _BLOCKED):
         page = fetch_comments(client, aid=100, count=40)
     assert page.rate_limited == (
-        "评论接口被风控（-352），只取到部分，约 10 分钟后用 next_cursor 续取。"
+        "评论接口触发风控（-352），只取到部分，约 10 分钟后用 next_cursor 续取。"
     )
     with pytest.raises(_RateLimited):
         client.get_json(_MAIN)

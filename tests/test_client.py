@@ -350,7 +350,7 @@ def test_comment_tools_refuse_while_breaker_open(comment_guard: Any) -> None:
     comment_guard.failed("-352")
     client = BilibiliClient()
     with patch("polylens_bilibili.client.fetch_view", side_effect=AssertionError("不该发请求")):
-        with pytest.raises(RateLimitedError, match="约 10 分钟后恢复"):
+        with pytest.raises(RateLimitedError, match="约 10 分钟后再试"):
             client.get_comments("BV1xx", count=20)
-        with pytest.raises(RateLimitedError, match="约 10 分钟后恢复"):
+        with pytest.raises(RateLimitedError, match="约 10 分钟后再试"):
             client.get_comment_replies("BV1xx", comment_ids=["1"])

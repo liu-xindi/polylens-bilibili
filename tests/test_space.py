@@ -124,7 +124,7 @@ def test_cursor_counts_pages_and_stops_at_total() -> None:
 
 
 def test_requires_login(monkeypatch: pytest.MonkeyPatch) -> None:
-    """未登录时平台常回 412，报风控会让调用方白等，故先拦下，不发请求。"""
+    """未登录时平台常回 412，按风控报错会让调用方等待恢复，故先拦下，不发请求。"""
     monkeypatch.setattr(space_mod, "fetch_nav", lambda c: NavInfo("img", "sub", False))
     client = _Client([_raw(0)], total=1)
     with pytest.raises(AuthRequiredError):
