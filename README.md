@@ -23,7 +23,7 @@
 
 ## 登录
 
-`get_comments`、`get_comment_replies`、`get_subtitles`、`get_frame` 需要登录。`start_qr_login` 返回二维码，用 B 站 App 扫码确认后，由 `complete_qr_login` 完成登录。凭据保存在 `~/.cache/polylens-bilibili/cookie`（设置了 `XDG_CACHE_HOME` 时位于其下），`logout` 会删除它。
+`get_comments`、`get_comment_replies`、`get_subtitles`、`get_frame`、`list_up_videos` 需要登录。`start_qr_login` 返回二维码，用 B 站 App 扫码确认后，由 `complete_qr_login` 完成登录。凭据保存在 `~/.cache/polylens-bilibili/cookie`（设置了 `XDG_CACHE_HOME` 时位于其下），`logout` 会删除它。
 
 ## 用 jq 精简返回
 

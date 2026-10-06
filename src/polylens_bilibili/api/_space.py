@@ -1,7 +1,7 @@
 """UP 主投稿列表：space/wbi/arc/search（WBI 签名），映射为 UpVideoItem。
 
-浏览器还会带 dm_* 风控参数、w_webid 等，实测登录后只带 WBI 签名就能稳定取到；
-未登录时时好时坏，常被风控拦下。
+浏览器还会带 dm_* 风控参数、w_webid 等，实测登录后只带 WBI 签名就能稳定取到。
+未登录时时好时坏，常回 412，故要求登录：拦不住时报风控会误导调用方去等。
 每页固定 40 条，与网页一致；游标是已取的页数。
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..errors import RateLimitedError
+from ..errors import AuthRequiredError, RateLimitedError
 from ..models import Page, UpVideoItem
 from ._constants import ENDPOINTS
 from ._http import HttpClient, _RateLimited
@@ -53,6 +53,8 @@ def fetch_up_videos(
     if keyword and keyword.strip():
         params["keyword"] = keyword.strip()
     nav = fetch_nav(client)
+    if not nav.is_login:
+        raise AuthRequiredError("up_videos")
     try:
         data = client.get_json(
             ENDPOINTS["space_videos"],

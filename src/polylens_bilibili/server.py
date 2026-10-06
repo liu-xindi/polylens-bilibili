@@ -573,7 +573,7 @@ def create_server(
             Field(description=_jq_desc(UpVideoItem, paged=True)),
         ] = None,
     ) -> UpVideosResult:
-        """每批最多 40 条。total 是视频总数，带 keyword 时为匹配数。
+        """每批最多 40 条。total 是视频总数，带 keyword 时为匹配数。需要登录。
 
         (uploader videos, channel uploads, other videos by this author)
         """

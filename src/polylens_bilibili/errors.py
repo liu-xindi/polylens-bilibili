@@ -18,7 +18,7 @@ class AuthRequiredError(BilibiliError):
 
 
 class RateLimitedError(BilibiliError):
-    """请求触发风控限速。中断即整体失败，不返回半程结果。"""
+    """请求触发风控，一条结果也没取到。中途触发而已有结果的，由各能力自行返回部分结果。"""
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
