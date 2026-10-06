@@ -49,7 +49,14 @@ _CURSOR_DESC = "续取游标：不传从头开始，回传上次返回的 next_c
 _REPLY_EXCLUDE = frozenset({"reply_count"})
 
 
-def _jq_desc(item_type: type, *, paged: bool, exclude: frozenset[str] = frozenset()) -> str:
+def _jq_desc(
+    item_type: type,
+    *,
+    paged: bool,
+    scope: str | None = None,
+    exclude: frozenset[str] = frozenset(),
+) -> str:
+    scope = scope or ("本批条目" if paged else "全部条目")
     shown = [f for f in fields(item_type) if f.name not in exclude]
     columns = ",".join(f.name for f in shown)
     bulky = "、".join(
@@ -59,11 +66,10 @@ def _jq_desc(item_type: type, *, paged: bool, exclude: frozenset[str] = frozense
     )
     paging = "分页字段不在输入里；只筛本批，筛完为空时仍以 has_more 判断有无下一批。"
     return (
-        f"可选的 jq 表达式。输入是本批条目组成的数组，每条字段：{columns}。"
+        f"可选的 jq 表达式。输入是{scope}组成的数组，每条字段：{columns}。"
         + (f"体积大、多数任务用不到的字段：{bulky}；特定任务需要时照常使用。" if bulky else "")
         + (paging if paged else "")
-        + "结果为同键对象数组时编成表格，单个字符串原样返回，其他形状给 JSON；"
-        "jq_count 是结果数组的元素数。"
+        + "结果为单个字符串时原样返回。"
     )
 
 
@@ -360,8 +366,9 @@ def create_server(
         jq: Annotated[
             str | None,
             Field(
-                description=_jq_desc(Comment, paged=False, exclude=_REPLY_EXCLUDE)
-                + "每个楼的 replies 分别执行。"
+                description=_jq_desc(
+                    Comment, paged=False, scope="单个楼的回复", exclude=_REPLY_EXCLUDE
+                )
             ),
         ] = None,
     ) -> CommentRepliesResult:
