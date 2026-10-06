@@ -132,5 +132,5 @@ def encode_items(
     try:
         outputs = run_jq(expr, rows)
     except JqError as e:
-        raise JqError(f"{e} 输入是本批条目组成的数组，每条字段：{','.join(columns)}。") from None
+        raise JqError(f"{e} 可用字段：{','.join(columns)}。") from None
     return encode(name, outputs)
