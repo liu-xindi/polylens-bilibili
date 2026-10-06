@@ -553,6 +553,24 @@ def _http() -> HttpClient:
     return HttpClient()
 
 
+def test_anonymous_get_bytes_sends_only_the_request_itself():
+    """匿名时不先访问首页换 cookie：对照实测各匿名能力有无 buvid3 结果一致，那一趟白跑。"""
+    client = _http()
+    opened: list[Any] = []
+
+    def _open(req, timeout=None):
+        opened.append(req)
+        resp = MagicMock()
+        resp.__enter__.return_value.read.return_value = b"{}"
+        return resp
+
+    client._opener.open = _open  # type: ignore[method-assign]
+    client.get_bytes("https://api.bilibili.com/x/test")
+
+    assert [r.full_url for r in opened] == ["https://api.bilibili.com/x/test"]
+    assert not opened[0].has_header("Cookie")
+
+
 def test_get_json_raises_rate_limited_on_412():
     client = _http()
     exc = urllib.error.HTTPError(url="", code=412, msg="", hdrs=http.client.HTTPMessage(), fp=None)
@@ -676,7 +694,7 @@ def test_capture_frame_keeps_credentials_out_of_ffmpeg_argv(
     from polylens_bilibili.api import _frame
 
     client = MagicMock()
-    client.combined_cookie.return_value = "SESSDATA=secret-value; bili_jct=token"
+    client.cookie = "SESSDATA=secret-value; bili_jct=token"
     seen: list[list[str]] = []
 
     out = tmp_path / "f.jpg"
@@ -702,7 +720,7 @@ def test_capture_frame_proxy_forwards_credentials_upstream(
     from polylens_bilibili.api import _frame
 
     client = MagicMock()
-    client.combined_cookie.return_value = "SESSDATA=secret-value"
+    client.cookie = "SESSDATA=secret-value"
     handler_cls: Any = _frame._make_proxy_handler(
         cast(HttpClient, client), "https://cdn.example/v.m4s"
     )
@@ -764,7 +782,7 @@ def test_capture_frame_rejects_empty_output_despite_zero_exit(
 
     monkeypatch.setattr(_frame.subprocess, "run", _fake_run)
     client = MagicMock()
-    client.combined_cookie.return_value = ""
+    client.cookie = ""
     with pytest.raises(RuntimeError):
         _frame._capture_frame(cast(HttpClient, client), "https://cdn/a", 1.0, str(out))
 

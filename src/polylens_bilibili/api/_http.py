@@ -29,13 +29,12 @@ class _RateLimited(Exception):
 
 
 class HttpClient:
-    """带 cookie jar 的极简客户端；无 cookie 时自动 bootstrap 匿名 cookie。"""
+    """带 cookie jar 的极简客户端。"""
 
     def __init__(self, cookie: str = "", timeout: int = 20) -> None:
         self.api_base = API_BASE.rstrip("/")
         self.cookie = cookie.strip()
         self.timeout = timeout
-        self._bootstrap_cookie = ""
         self._jar = http.cookiejar.CookieJar()
         self._opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(self._jar))
 
@@ -46,24 +45,11 @@ class HttpClient:
             "Origin": "https://www.bilibili.com",
             "Accept": "application/json, text/plain, */*",
         }
-        cookie = self.cookie or self._bootstrap_cookie
-        if cookie:
-            headers["Cookie"] = cookie
+        if self.cookie:
+            headers["Cookie"] = self.cookie
         return headers
 
-    def bootstrap_anonymous_cookie(self) -> None:
-        if self.cookie or self._bootstrap_cookie:
-            return
-        request = Request(WEB_HOME, headers=self._headers())
-        with self._opener.open(request, timeout=self.timeout) as response:
-            response.read()
-        self._bootstrap_cookie = "; ".join(f"{c.name}={c.value}" for c in self._jar)
-
-    def combined_cookie(self) -> str:
-        return "; ".join(c for c in [self.cookie, self._bootstrap_cookie] if c)
-
     def get_bytes(self, url: str, referer: str = _DEFAULT_REFERER) -> bytes:
-        self.bootstrap_anonymous_cookie()
         request = Request(url, headers=self._headers(referer))
         with self._opener.open(request, timeout=self.timeout) as response:
             return response.read()

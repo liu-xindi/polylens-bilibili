@@ -69,7 +69,7 @@ class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 def _make_proxy_handler(client: HttpClient, cdn_url: str) -> type:
     """返回一个 Handler 类，将所有请求代理到 cdn_url，透传 Range 头并附上 Cookie。"""
-    combined_cookie = client.combined_cookie()
+    cookie = client.cookie
 
     class _Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: Any) -> None:
@@ -81,8 +81,8 @@ def _make_proxy_handler(client: HttpClient, cdn_url: str) -> type:
                 "Referer": WEB_HOME,
                 "Origin": "https://www.bilibili.com",
             }
-            if combined_cookie:
-                headers["Cookie"] = combined_cookie
+            if cookie:
+                headers["Cookie"] = cookie
             if "Range" in self.headers:
                 headers["Range"] = self.headers["Range"]
 
