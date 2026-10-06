@@ -159,7 +159,7 @@ def fetch_search(
     echoed_page_size = (data or {}).get("pagesize")
     if echoed_page_size is not None and echoed_page_size != SEARCH_PAGE_SIZE:
         raise BilibiliError(
-            f"平台未按请求的每页条数分页 (请求 {SEARCH_PAGE_SIZE}, 实为 {echoed_page_size})"
+            f"平台未按请求的每页条数分页（请求 {SEARCH_PAGE_SIZE}，实为 {echoed_page_size}）"
         )
     result = (data or {}).get("result")
     if result is not None and not isinstance(result, list):
@@ -167,7 +167,7 @@ def fetch_search(
         # 静默返回空页会把它伪装成"这批全是坏条目"。字符串最需要这道判定 ——
         # 它可切片可迭代, 逐字符都会被条目级的 isinstance 挡掉, 整页悄悄变空而游标照走。
         # 判在兜空值之前: "" 与 {} 也是形状变了, 不是"没有结果"。缺 result 才是没有结果。
-        raise BilibiliError(f"搜索响应的 result 不是列表, 而是 {type(result).__name__}")
+        raise BilibiliError(f"搜索响应的 result 应为列表，实为 {type(result).__name__}")
     # 页码越过总页数时平台不给空页，而是回显最后一页的页码并返回那一页
     echoed_page = (data or {}).get("page")
     if isinstance(echoed_page, int) and echoed_page != pages_taken + 1:

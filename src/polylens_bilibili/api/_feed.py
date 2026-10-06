@@ -61,5 +61,5 @@ def fetch_feed(client: HttpClient) -> list[FeedItem]:
     items = (data or {}).get("item")
     if items is not None and not isinstance(items, list):
         # 与搜索一致：条目一级的坏数据跳过，容器一级的形状变化显式失败。
-        raise BilibiliError(f"推荐流响应的 item 不是列表, 而是 {type(items).__name__}")
+        raise BilibiliError(f"推荐流响应的 item 应为列表，实为 {type(items).__name__}")
     return [item for raw in (items or []) if (item := _to_feed_item(raw)) is not None]
