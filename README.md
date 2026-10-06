@@ -22,7 +22,15 @@
 | `logout` | 退出登录 | — |
 | `start_qr_login` · `complete_qr_login` | 扫码登录 | — |
 
-`search_videos`、`list_up_videos`、`get_feed`、`get_parts`、`get_comments`、`get_comment_replies`、`get_subtitles` 接受可选的 `jq` 参数，在返回前筛选本批条目或只保留部分字段，例如字幕只要文本：`map(.content) | join("\n")`。
+## 用 jq 精简返回
+
+`search_videos`、`list_up_videos`、`get_feed`、`get_parts`、`get_comments`、`get_comment_replies`、`get_subtitles` 接受可选的 `jq` 参数，在返回前筛选条目或只保留部分字段，减少占用的上下文。表达式由模型根据工具说明自行编写。
+
+| 用途 | 表达式 |
+|---|---|
+| 字幕只要文本 | `map(.content) \| join("\n")` |
+| 只看第 10 到 15 分钟的字幕 | `[.[] \| select(.start >= 600 and .start < 900)]` |
+| 搜索结果只留高播放量 | `[.[] \| select(.view_count > 100000) \| {title, url, view_count}]` |
 
 ## 安装
 
