@@ -151,9 +151,9 @@ def fetch_search(
     signed = sign_params(params, nav.img_key, nav.sub_key)
     try:
         data = client.get_json(ENDPOINTS["search_type"], signed, referer=SEARCH_REFERER)
-    except _RateLimited:
+    except _RateLimited as e:
         # 判到底会把风控伪装成"没有更多结果"，翻页从此静默断掉
-        raise RateLimitedError("搜索触发风控，稍后重试。") from None
+        raise RateLimitedError(e.describe("搜索")) from None
     # 平台哪天不按请求的 page_size 分页，按页数续取就会错位，结果静默截断或重复。
     # 响应回显了 pagesize 就核一遍，把这个前提变成代码里自己会报警的不变量。
     echoed_page_size = (data or {}).get("pagesize")

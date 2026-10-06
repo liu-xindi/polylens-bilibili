@@ -126,7 +126,7 @@ class Page[Item]:
     items: list[Item]
     has_more: bool = False
     next_cursor: str | None = None
-    rate_limited: bool = False  # 中途触发风控，这批只有风控前取到的部分
+    rate_limited: str | None = None  # 中途触发风控的信号；有值时这批只有风控前取到的部分
 
 
 @dataclass(slots=True)

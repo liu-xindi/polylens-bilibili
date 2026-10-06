@@ -163,11 +163,11 @@ def test_get_comments_returns_toon_and_paging() -> None:
 
 
 def test_get_comments_rate_limited_partial_carries_message() -> None:
-    page = Page(items=[], has_more=True, next_cursor="SESSION", rate_limited=True)
+    page = Page(items=[], has_more=True, next_cursor="SESSION", rate_limited="-352")
     with _with_client(get_comments=page):
         payload = _payload("get_comments", {"url": BV_URL, "count": 40})
     assert payload["next_cursor"] == "SESSION"
-    assert "风控" in payload["message"]
+    assert "风控（-352）" in payload["message"]
 
 
 def test_get_comments_omits_next_cursor_at_end() -> None:

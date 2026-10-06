@@ -135,7 +135,7 @@ def test_requires_login(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_rate_limit_becomes_error() -> None:
     class _Limited(_Client):
         def get_json(self, *a: Any, **kw: Any) -> Any:
-            raise _RateLimited()
+            raise _RateLimited("-352", "/x")
 
     with pytest.raises(RateLimitedError):
         _fetch(_Limited([], total=0))

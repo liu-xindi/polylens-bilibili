@@ -237,7 +237,7 @@ def test_rate_limited_surfaces_as_error_not_end_of_results(
 
     class _Blocked:
         def get_json(self, path, params=None, **kw):
-            raise search_mod._RateLimited()
+            raise search_mod._RateLimited("-352", "/x")
 
     with pytest.raises(RateLimitedError):
         _fetch(_Blocked())

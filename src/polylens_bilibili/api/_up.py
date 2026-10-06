@@ -59,8 +59,8 @@ def _to_info(mid: int, data: dict[str, Any]) -> UpInfo:
 def fetch_up_info(client: HttpClient, mid: int) -> UpInfo:
     try:
         data = client.get_json(ENDPOINTS["up_card"], {"mid": mid}, allow_codes={_NOT_FOUND})
-    except _RateLimited:
-        raise RateLimitedError("取 UP 主资料触发风控，稍后重试。") from None
+    except _RateLimited as e:
+        raise RateLimitedError(e.describe("取 UP 主资料")) from None
     if data is None:
         raise BilibiliError(f"UP 主不存在：mid {mid}")
     return _to_info(mid, data)

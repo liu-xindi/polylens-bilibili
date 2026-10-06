@@ -87,4 +87,4 @@ def test_missing_mid_raises() -> None:
 
 def test_rate_limited_is_translated() -> None:
     with pytest.raises(RateLimitedError):
-        _fetch(_Client(exc=_RateLimited()))
+        _fetch(_Client(exc=_RateLimited("-352", "/x")))

@@ -345,7 +345,9 @@ def create_server(
             has_more=page.has_more,
             next_cursor=page.next_cursor,
             message=(
-                "触发风控，只取到部分评论，稍后用 next_cursor 续取。" if page.rate_limited else None
+                f"触发风控（{page.rate_limited}），只取到部分评论，稍后用 next_cursor 续取。"
+                if page.rate_limited
+                else None
             ),
         )
 

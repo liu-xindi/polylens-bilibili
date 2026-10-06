@@ -173,8 +173,8 @@ def fetch_replies(
             except BilibiliError as e:
                 results.append(ReplyThread(comment_id=cid, page=Page(items=[]), error=str(e)))
             time.sleep(_AFTER_THREAD_DELAY)
-    except _RateLimited:
-        raise RateLimitedError("二级评论抓取触发风控，稍后重试。") from None
+    except _RateLimited as e:
+        raise RateLimitedError(e.describe("二级评论抓取")) from None
     return results
 
 
@@ -276,9 +276,9 @@ def fetch_comments(
             offset = (cur.get("pagination_reply") or {}).get("next_offset") or None
             if offset is not None and len(comments) < want:
                 time.sleep(_MAIN_PAGE_DELAY)
-    except _RateLimited:
+    except _RateLimited as e:
         if not comments:
-            raise RateLimitedError("触发风控，稍后重试。") from None
-        return Page(items=comments, has_more=True, next_cursor=offset, rate_limited=True)
+            raise RateLimitedError(e.describe("评论")) from None
+        return Page(items=comments, has_more=True, next_cursor=offset, rate_limited=e.signal)
 
     return Page(items=comments, has_more=offset is not None, next_cursor=offset)

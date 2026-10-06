@@ -159,6 +159,6 @@ def test_rate_limit_surfaces(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(feed_mod, "fetch_nav", lambda c: NavInfo("img", "sub", True))
     monkeypatch.setattr(feed_mod, "sign_params", lambda p, *a, **k: p)
     client = MagicMock()
-    client.get_json.side_effect = _RateLimited()
+    client.get_json.side_effect = _RateLimited("-352", "/x")
     with pytest.raises(_RateLimited):
         fetch_feed(client)

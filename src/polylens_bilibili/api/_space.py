@@ -61,8 +61,8 @@ def fetch_up_videos(
             sign_params(params, nav.img_key, nav.sub_key),
             referer=f"https://space.bilibili.com/{mid}/upload/video",
         )
-    except _RateLimited:
-        raise RateLimitedError("取 UP 主投稿触发风控，稍后重试。") from None
+    except _RateLimited as e:
+        raise RateLimitedError(e.describe("取 UP 主投稿")) from None
     vlist = data["list"]["vlist"] or []
     total = data["page"]["count"]
     has_more = (pages_taken + 1) * PAGE_SIZE < total and len(vlist) > 0

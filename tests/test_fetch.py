@@ -211,12 +211,12 @@ def test_fetch_comments_rate_limited_midway_returns_partial():
     client = MagicMock()
     client.get_json.side_effect = [
         _page([_reply(1, "a")], is_end=False, next_offset="SESSION"),
-        _RateLimited(),
+        _RateLimited("-352", "/x"),
     ]
     with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
         page = fetch_comments(client, aid=100, count=40)
     assert [c.content for c in page.items] == ["a"]
-    assert page.rate_limited is True
+    assert page.rate_limited == "-352"
     assert page.has_more is True and page.next_cursor == "SESSION"
 
 
@@ -412,7 +412,7 @@ def test_fetch_replies_isolates_failing_thread():
 
 def test_fetch_replies_rate_limited_raises():
     client = MagicMock()
-    client.get_json.side_effect = _RateLimited()
+    client.get_json.side_effect = _RateLimited("-352", "/x")
     with _nav_patch("_comments"), _SLEEP_PATCH:
         with pytest.raises(RateLimitedError):
             fetch_replies(client, 100, ["1"], limit=5)
@@ -571,19 +571,44 @@ def test_anonymous_get_bytes_sends_only_the_request_itself():
     assert not opened[0].has_header("Cookie")
 
 
-def test_get_json_raises_rate_limited_on_412():
+@pytest.mark.parametrize("status", [412, 429])
+def test_get_json_raises_rate_limited_on_http_status(status: int):
     client = _http()
-    exc = urllib.error.HTTPError(url="", code=412, msg="", hdrs=http.client.HTTPMessage(), fp=None)
-    with patch.object(client, "get_bytes", side_effect=exc), pytest.raises(_RateLimited):
+    hdrs = http.client.HTTPMessage()
+    exc = urllib.error.HTTPError(url="", code=status, msg="", hdrs=hdrs, fp=None)
+    with patch.object(client, "get_bytes", side_effect=exc), pytest.raises(_RateLimited) as info:
         client.get_json("/test")
+    assert info.value.signal == str(status) and info.value.path == "/test"
 
 
 @pytest.mark.parametrize("code", [-352, -509])
 def test_get_json_raises_rate_limited_on_risk_codes(code: int):
     client = _http()
     raw = json.dumps({"code": code, "message": "风控"}).encode()
-    with patch.object(client, "get_bytes", return_value=raw), pytest.raises(_RateLimited):
+    with patch.object(client, "get_bytes", return_value=raw), pytest.raises(_RateLimited) as info:
         client.get_json("/test")
+    assert info.value.signal == str(code)
+
+
+def test_rate_limited_message_carries_signal():
+    """429 几秒到几十秒就恢复（导出的调用记录里 3 次，重试都成功），文案与其他信号分开。"""
+    assert _RateLimited("429", "/x").describe("搜索") == "搜索被平台限流（429），几秒后可重试。"
+    assert _RateLimited("-352", "/x").describe("搜索") == "搜索触发风控（-352），稍后重试。"
+    assert "412" in str(_RateLimited("412", "/x"))  # 没被能力接住时直接报出的那句
+
+
+def test_rate_limited_is_logged_with_recent_requests(caplog: pytest.LogCaptureFixture):
+    """日志记下被拦前同组的请求密度：阈值没有实测依据，只能靠它日后校准。"""
+    client = _http()
+    ok = json.dumps({"code": 0, "data": {}}).encode()
+    blocked = json.dumps({"code": -352}).encode()
+    with patch.object(client, "get_bytes", side_effect=[ok, blocked]), caplog.at_level("WARNING"):
+        client.get_json("/x/v2/reply/reply")
+        with pytest.raises(_RateLimited):
+            client.get_json("/x/v2/reply/wbi/main")
+    [record] = caplog.records
+    assert "-352" in record.getMessage() and "/x/v2/reply/wbi/main" in record.getMessage()
+    assert record.args[-1][:2] == [0.0, 0.0]  # type: ignore[index]  主评论与二级评论同组
 
 
 def test_get_json_raises_rate_limited_on_voucher_only_data():
@@ -593,8 +618,9 @@ def test_get_json_raises_rate_limited_on_voucher_only_data():
     """
     client = _http()
     raw = json.dumps({"code": 0, "data": {"v_voucher": "voucher_abc"}}).encode()
-    with patch.object(client, "get_bytes", return_value=raw), pytest.raises(_RateLimited):
+    with patch.object(client, "get_bytes", return_value=raw), pytest.raises(_RateLimited) as info:
         client.get_json("/test")
+    assert info.value.signal == "v_voucher"
 
 
 def test_get_json_keeps_data_when_voucher_accompanies_real_fields():
@@ -664,7 +690,7 @@ def test_get_json_non412_http_error_reraises():
 
 def test_fetch_comments_rate_limited_on_first_page_raises():
     client = MagicMock()
-    client.get_json.side_effect = _RateLimited()
+    client.get_json.side_effect = _RateLimited("-352", "/x")
     with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
         with pytest.raises(RateLimitedError):
             fetch_comments(client, aid=100, count=20)
