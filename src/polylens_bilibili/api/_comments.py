@@ -8,7 +8,6 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-import time
 from typing import Any
 
 from ..errors import AuthRequiredError, BilibiliError, RateLimitedError
@@ -17,10 +16,6 @@ from ._constants import ENDPOINTS, REPLY_PAGE_SIZE
 from ._http import HttpClient, _RateLimited
 from ._search import _int_or_none
 from ._signing import fetch_nav, sign_params
-
-_MAIN_PAGE_DELAY = 0.2  # 主评论翻页间隔（抗风控）
-_REPLY_PAGE_DELAY = 0.15  # 二级评论翻页间隔
-_AFTER_THREAD_DELAY = 0.2  # 每抓完一条主评论的回复之后
 
 
 def _joined(values: list[str]) -> str | None:
@@ -135,7 +130,6 @@ def _fetch_thread(
             reached_end = True
             break
         pn += 1
-        time.sleep(_REPLY_PAGE_DELAY)
     window = collected if limit is None else collected[:limit]
     replies = [
         _normalize_reply(raw, root_id=root_id, upper_mid=upper_mid) for raw in window
@@ -153,7 +147,7 @@ def fetch_replies(
 ) -> list[ReplyThread]:
     """按 comment_id 钻取二级评论。limit 是每条主评论只取前多少条；不传则全部取完。
 
-    内部串行（防风控）；中途触发风控则抛 RateLimitedError，不返回半程结果。
+    内部串行，请求间隔由 HTTP 层统一控制；中途触发风控则抛 RateLimitedError，不返回半程结果。
     单条主评论取不到（评论不存在、不属于这个视频）只记在它的 error 上，不影响其他。
     二级评论接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
     """
@@ -172,7 +166,6 @@ def fetch_replies(
                 results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
             except BilibiliError as e:
                 results.append(ReplyThread(comment_id=cid, page=Page(items=[]), error=str(e)))
-            time.sleep(_AFTER_THREAD_DELAY)
     except _RateLimited as e:
         raise RateLimitedError(e.describe("二级评论抓取")) from None
     return results
@@ -274,11 +267,12 @@ def fetch_comments(
                 offset = None
                 break
             offset = (cur.get("pagination_reply") or {}).get("next_offset") or None
-            if offset is not None and len(comments) < want:
-                time.sleep(_MAIN_PAGE_DELAY)
     except _RateLimited as e:
         if not comments:
             raise RateLimitedError(e.describe("评论")) from None
-        return Page(items=comments, has_more=True, next_cursor=offset, rate_limited=e.signal)
+        return Page(
+            items=comments, has_more=True, next_cursor=offset,
+            rate_limited=e.describe_partial("评论"),
+        )
 
     return Page(items=comments, has_more=offset is not None, next_cursor=offset)

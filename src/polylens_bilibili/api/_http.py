@@ -5,10 +5,13 @@ from __future__ import annotations
 import http.cookiejar
 import json
 import logging
+import math
+import threading
 import time
 import urllib.error
 import zlib
 from collections import deque
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
@@ -50,15 +53,120 @@ class _RateLimited(Exception):
     文案与日志，不替平台解释。已知的只有 429：几秒到几十秒就恢复。
     """
 
-    def __init__(self, signal: str, path: str) -> None:
+    def __init__(self, signal: str, path: str, retry_in: float | None = None) -> None:
         self.signal = signal
         self.path = path
-        super().__init__(self.describe("请求"))  # 没被各能力接住时，工具层原样报出这句
+        self.retry_in = retry_in  # 评论组熔断时距恢复的秒数，其余为 None
+        super().__init__(signal)
+
+    def __str__(self) -> str:
+        return self.describe("请求")  # 没被各能力接住时，工具层原样报出这句
 
     def describe(self, what: str) -> str:
+        if self.retry_in is not None:
+            return (
+                f"评论接口被风控（{self.signal}），约 {_minutes(self.retry_in)} 分钟后恢复，"
+                "期间重试或重新登录都无效。"
+            )
         if self.signal == "429":
             return f"{what}被平台限流（429），几秒后可重试。"
         return f"{what}触发风控（{self.signal}），稍后重试。"
+
+    def describe_partial(self, what: str) -> str:
+        """中途被拦、已有部分结果时的说明。"""
+        if self.retry_in is not None:
+            return (
+                f"评论接口被风控（{self.signal}），只取到部分，"
+                f"约 {_minutes(self.retry_in)} 分钟后用 next_cursor 续取。"
+            )
+        if self.signal == "429":
+            return f"{what}被平台限流（429），只取到部分，几秒后用 next_cursor 续取。"
+        return f"{what}触发风控（{self.signal}），只取到部分，稍后用 next_cursor 续取。"
+
+
+def _minutes(seconds: float) -> int:
+    return max(1, math.ceil(seconds / 60))
+
+
+_COMMENT_INTERVAL = 1.0
+_COOLDOWN = 600.0
+_RECHECK = 300.0
+
+
+class _CommentGuard:
+    """评论组的节流与熔断，进程内共享：http 部署下所有会话共用一份。
+
+    节流：相邻两次评论请求的发出时刻至少隔 _COMMENT_INTERVAL 秒。按发出时刻算，本身慢的
+    请求不再额外等。原先是各次调用内部翻页之间 sleep，调用与调用之间、同时到达的几个调用
+    之间仍是背靠背。1 秒没有实测依据，只是不拖慢平时用量（导出的记录里 3 分钟内最多十几页）；
+    10-06 那次几分钟内取了约五六十页被拦，按 1 秒照样会触发，挡那种情形靠熔断。
+
+    熔断：评论组收到 429 以外的风控信号即停用 _COOLDOWN 秒，期间不发请求。10-06 实测：
+    被拦后换排序、换视频、重新登录都不通，约 7.5–15.5 分钟后恢复，继续请求只会白白失败。
+    到期放行一个请求试探，仍被拦再停 _RECHECK 秒。429 几秒就恢复，不熔断。
+    """
+
+    def __init__(
+        self,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = threading.Lock()
+        self._last_start: float | None = None
+        self._blocked_until = 0.0  # 非 0 表示熔断过、尚未确认恢复
+        self._signal = ""
+        self._probing = False
+
+    def _refuse(self, now: float) -> None:
+        if now < self._blocked_until or self._probing:
+            raise _RateLimited(self._signal, "", retry_in=max(self._blocked_until - now, 0.0))
+
+    def check(self) -> None:
+        """熔断中则抛错。工具入口先查一遍，省掉取视频信息等前置请求。"""
+        with self._lock:
+            self._refuse(self._clock())
+
+    def acquire(self) -> None:
+        with self._lock:
+            now = self._clock()
+            self._refuse(now)
+            if self._blocked_until:
+                self._probing = True
+                _log.warning("评论接口熔断到期，放行一个请求试探")
+            if self._last_start is not None:
+                wait = self._last_start + _COMMENT_INTERVAL - now
+                if wait > 0:
+                    self._sleep(wait)
+            self._last_start = self._clock()
+
+    def reached(self) -> None:
+        """平台正常作答（含业务错误码），说明没被拦。"""
+        with self._lock:
+            if self._probing:
+                _log.warning("评论接口试探通过，熔断解除")
+            self._probing = False
+            self._blocked_until = 0.0
+
+    def failed(self, signal: str | None) -> float | None:
+        """请求失败。signal 为 None 表示与风控无关（网络等）。返回熔断剩余秒数，未熔断为 None。"""
+        with self._lock:
+            probing, self._probing = self._probing, False
+            if signal is None or signal == "429":
+                return None
+            duration = _RECHECK if probing else _COOLDOWN
+            self._signal = signal
+            self._blocked_until = self._clock() + duration
+            _log.warning("评论接口熔断 %d 秒（信号 %s）", duration, signal)
+            return duration
+
+
+_comment_guard = _CommentGuard()
+
+
+def check_comments_open() -> None:
+    _comment_guard.check()
 
 
 class HttpClient:
@@ -97,6 +205,32 @@ class HttpClient:
         allow_codes: set[int] | None = None,
     ) -> Any:
         """请求 JSON 接口并返回 data 字段；非 0 code 抛错（白名单除外）。"""
+        if _group(path) != "comments":
+            return self._get_json(path, params, referer, base_url, allow_codes)
+        guard = _comment_guard  # 取一次：测试会整个替换它
+        guard.acquire()
+        try:
+            data = self._get_json(path, params, referer, base_url, allow_codes)
+        except _RateLimited as e:
+            e.retry_in = guard.failed(e.signal)
+            raise
+        except BilibiliHttpError:
+            guard.reached()
+            raise
+        except BaseException:
+            guard.failed(None)
+            raise
+        guard.reached()
+        return data
+
+    def _get_json(
+        self,
+        path: str,
+        params: dict[str, Any] | None,
+        referer: str,
+        base_url: str | None,
+        allow_codes: set[int] | None,
+    ) -> Any:
         base = base_url if base_url is not None else self.api_base
         url = f"{base}{path}"
         if params:

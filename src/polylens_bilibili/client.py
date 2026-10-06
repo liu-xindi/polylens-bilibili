@@ -16,7 +16,7 @@ from .api._constants import SHORT_LINK_HOSTS, USER_AGENT
 from .api._danmaku import fetch_danmaku, top_by_heat
 from .api._feed import fetch_feed
 from .api._frame import fetch_frame
-from .api._http import HttpClient, _RateLimited
+from .api._http import HttpClient, _RateLimited, check_comments_open
 from .api._login import check_qr_login, start_qr_login
 from .api._search import fetch_search
 from .api._signing import fetch_nav
@@ -25,7 +25,7 @@ from .api._subtitles import SubtitleTrack, fetch_subtitles
 from .api._suggest import fetch_suggest
 from .api._up import fetch_up_info
 from .api._video import build_video_info, cid_for_page, clip_duration, fetch_view, list_parts
-from .errors import BilibiliError
+from .errors import BilibiliError, RateLimitedError
 from .models import (
     Comment,
     Danmaku,
@@ -175,6 +175,7 @@ class BilibiliClient:
     def get_comments(
         self, video_id: str, *, count: int, cursor: str | None = None, sort: str = "hot"
     ) -> Page[Comment]:
+        _comments_open()
         _info, aid, _cid = build_video_info(self._view(video_id))
         return fetch_comments(self._http, aid, count=count, cursor=cursor, sort=sort)
 
@@ -187,6 +188,7 @@ class BilibiliClient:
     ) -> list[ReplyThread]:
         if not comment_ids:
             return []
+        _comments_open()
         _info, aid, _cid = build_video_info(self._view(video_id))
         return fetch_replies(self._http, aid, [str(c) for c in comment_ids], limit=limit)
 
@@ -248,6 +250,14 @@ class BilibiliClient:
 
     def get_feed(self) -> list[FeedItem]:
         return fetch_feed(self._http)
+
+
+def _comments_open() -> None:
+    """评论组熔断中直接报错，连取视频信息的请求也省掉。"""
+    try:
+        check_comments_open()
+    except _RateLimited as e:
+        raise RateLimitedError(str(e)) from None
 
 
 def _id_params(video_id: str) -> dict[str, Any]:

@@ -344,11 +344,7 @@ def create_server(
             jq_count=jq_count,
             has_more=page.has_more,
             next_cursor=page.next_cursor,
-            message=(
-                f"触发风控（{page.rate_limited}），只取到部分评论，稍后用 next_cursor 续取。"
-                if page.rate_limited
-                else None
-            ),
+            message=page.rate_limited,
         )
 
     @mcp.tool(annotations=_READS_PLATFORM)

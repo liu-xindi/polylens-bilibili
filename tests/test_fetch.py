@@ -41,7 +41,6 @@ _SIGN_PATCH = patch(
 _SIGN_PATCH_SUB = patch(
     "polylens_bilibili.api._subtitles.sign_params", side_effect=lambda p, *a, **kw: p
 )
-_SLEEP_PATCH = patch("polylens_bilibili.api._comments.time.sleep")
 
 
 def _reply(rpid: int, content: str, *, parent: int = 0, count: int = 0, mid: int = 1) -> dict:
@@ -111,7 +110,7 @@ def test_fetch_comments_count_truncates_with_next_cursor():
 
     client = MagicMock()
     client.get_json.side_effect = _get_json
-    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+    with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=25)
     assert call_count == 2
     assert len(page.items) == 40
@@ -132,7 +131,7 @@ def test_fetch_comments_short_page_is_not_the_end():
     ]
     client = MagicMock()
     client.get_json.side_effect = lambda endpoint, params: pages[client.get_json.call_count - 1]
-    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+    with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=35)
     assert client.get_json.call_count == 2  # 首页的 19 条没被当成末页
     assert len(page.items) == 40  # 置顶 1 + 首页 19 + 次页 20
@@ -151,7 +150,7 @@ def test_fetch_comments_cursor_never_points_at_a_consumed_page():
     ]
     client = MagicMock()
     client.get_json.side_effect = lambda endpoint, params: pages[client.get_json.call_count - 1]
-    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+    with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=25)
     assert [c.content for c in page.items][-1] == "last"  # 第二页已经收进结果
     assert page.has_more is False and page.next_cursor is None
@@ -162,7 +161,7 @@ def test_fetch_comments_empty_page_after_a_full_one_ends_cleanly():
     pages = [_full_page(1), _page([], is_end=False, next_offset="offset2")]
     client = MagicMock()
     client.get_json.side_effect = lambda endpoint, params: pages[client.get_json.call_count - 1]
-    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+    with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=25)
     assert len(page.items) == 20
     assert page.has_more is False and page.next_cursor is None
@@ -180,7 +179,7 @@ def test_fetch_comments_rejects_non_positive_count(bad: int):
 @pytest.mark.parametrize("bad", [0, -3])
 def test_fetch_replies_rejects_non_positive_limit(bad: int):
     client = MagicMock()
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         with pytest.raises(BilibiliError):
             fetch_replies(client, 100, ["1"], limit=bad)
     client.get_json.assert_not_called()
@@ -213,10 +212,10 @@ def test_fetch_comments_rate_limited_midway_returns_partial():
         _page([_reply(1, "a")], is_end=False, next_offset="SESSION"),
         _RateLimited("-352", "/x"),
     ]
-    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+    with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=40)
     assert [c.content for c in page.items] == ["a"]
-    assert page.rate_limited == "-352"
+    assert page.rate_limited == "评论触发风控（-352），只取到部分，稍后用 next_cursor 续取。"
     assert page.has_more is True and page.next_cursor == "SESSION"
 
 
@@ -243,7 +242,7 @@ def test_fetch_replies_marks_up_from_upper():
     client.get_json.return_value = {
         "replies": [_reply(1, "up", mid=42), _reply(2, "fan")], "upper": {"mid": 42},
     }
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555"])
     assert [c.is_up for c in out[0].page.items] == [True, False]
 
@@ -251,7 +250,7 @@ def test_fetch_replies_marks_up_from_upper():
 def test_fetch_replies_slices_window_by_limit():
     client = MagicMock()
     client.get_json.side_effect = _sub_page
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555"], limit=5)
     t = out[0]
     assert t.comment_id == "555"
@@ -269,7 +268,7 @@ def test_fetch_replies_limit_beyond_page_size_accumulates():
 
     client = MagicMock()
     client.get_json.side_effect = _get_json
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555"], limit=50)
     t = out[0]
     assert len(t.page.items) == 50
@@ -288,7 +287,7 @@ def test_fetch_replies_without_limit_reads_whole_thread():
 
     client = MagicMock()
     client.get_json.side_effect = _get_json
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555"])
     t = out[0]
     assert seen_pn == [1, 2, 3]
@@ -317,7 +316,7 @@ def test_fetch_replies_limit_applies_per_thread():
     """limit 对每条主评论各自生效：没取完的标 has_more，一次到底的不标。"""
     client = MagicMock()
     client.get_json.side_effect = _make_sized_sub_page({1: 8, 2: 12, 3: 3})
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
     by_id = {t.comment_id: t for t in out}
     assert [len(by_id[c].page.items) for c in ("1", "2", "3")] == [5, 5, 3]
@@ -336,7 +335,7 @@ def test_fetch_replies_reports_withheld_count():
         "root": {"count": 11},
         "page": {"num": 1, "size": 20, "count": 10},
     }
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555"], limit=5)
     assert out[0].withheld == 1
 
@@ -354,14 +353,14 @@ def test_fetch_replies_reports_withheld_count():
 def test_fetch_replies_withheld_degrades_to_zero(shape: dict):
     client = MagicMock()
     client.get_json.return_value = {"replies": [_reply(1, "r")], **shape}
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555"], limit=5)
     assert out[0].withheld == 0
 
 
 def test_fetch_replies_requires_login():
     client = MagicMock()
-    with _nav_patch("_comments", _ANONYMOUS), _SLEEP_PATCH:
+    with _nav_patch("_comments", _ANONYMOUS):
         with pytest.raises(AuthRequiredError):
             fetch_replies(client, 100, ["1"], limit=5)
     client.get_json.assert_not_called()
@@ -379,7 +378,7 @@ def test_fetch_comments_rejects_unparsable_cursor(bad: str):
 
 def test_fetch_replies_rejects_non_numeric_ids():
     client = MagicMock()
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         with pytest.raises(BilibiliError, match="comment_ids 需为数字 id，收到 abc"):
             fetch_replies(client, 100, ["1", "abc"])
     client.get_json.assert_not_called()
@@ -389,7 +388,7 @@ def test_fetch_replies_rejects_comment_of_another_video():
     """平台按 root 定位主评论，不校验 oid；响应里 root.oid 才是评论真正所属的视频。"""
     client = MagicMock()
     client.get_json.return_value = {"replies": [_reply(1, "r")], "root": {"oid": 999}}
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555"])
     assert out[0].page.items == []
     assert out[0].error is not None and "不属于这个视频" in out[0].error
@@ -403,7 +402,7 @@ def test_fetch_replies_isolates_failing_thread():
 
     client = MagicMock()
     client.get_json.side_effect = _get
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         out = fetch_replies(client, 100, ["555", "1"])
     assert [t.comment_id for t in out] == ["555", "1"]
     assert [c.content for c in out[0].page.items] == ["ok"] and out[0].error is None
@@ -413,7 +412,7 @@ def test_fetch_replies_isolates_failing_thread():
 def test_fetch_replies_rate_limited_raises():
     client = MagicMock()
     client.get_json.side_effect = _RateLimited("-352", "/x")
-    with _nav_patch("_comments"), _SLEEP_PATCH:
+    with _nav_patch("_comments"):
         with pytest.raises(RateLimitedError):
             fetch_replies(client, 100, ["1"], limit=5)
 
@@ -606,7 +605,7 @@ def test_rate_limited_is_logged_with_recent_requests(caplog: pytest.LogCaptureFi
         client.get_json("/x/v2/reply/reply")
         with pytest.raises(_RateLimited):
             client.get_json("/x/v2/reply/wbi/main")
-    [record] = caplog.records
+    record = caplog.records[0]
     assert "-352" in record.getMessage() and "/x/v2/reply/wbi/main" in record.getMessage()
     assert record.args[-1][:2] == [0.0, 0.0]  # type: ignore[index]  主评论与二级评论同组
 
@@ -691,7 +690,7 @@ def test_get_json_non412_http_error_reraises():
 def test_fetch_comments_rate_limited_on_first_page_raises():
     client = MagicMock()
     client.get_json.side_effect = _RateLimited("-352", "/x")
-    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+    with _nav_patch("_comments"), _SIGN_PATCH:
         with pytest.raises(RateLimitedError):
             fetch_comments(client, aid=100, count=20)
 
@@ -925,3 +924,138 @@ def test_fetch_comments_rejects_unknown_sort():
         with pytest.raises(BilibiliError):
             fetch_comments(client, aid=100, count=5, sort="oldest")
     client.get_json.assert_not_called()
+
+
+# ── 评论组的节流与熔断 ──────────────────────────────────────────────────────
+
+_MAIN = "/x/v2/reply/wbi/main"
+_SUB = "/x/v2/reply/reply"
+_OK = json.dumps({"code": 0, "data": {}}).encode()
+_BLOCKED = json.dumps({"code": -352}).encode()
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.slept: list[float] = []
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(round(seconds, 3))
+        self.now += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    from polylens_bilibili.api import _http
+
+    c = _Clock()
+    monkeypatch.setattr(_http, "_comment_guard", _http._CommentGuard(clock=c, sleep=c.sleep))
+    return c
+
+
+def _answer(client: HttpClient, *bodies: bytes) -> Any:
+    return patch.object(client, "get_bytes", side_effect=list(bodies))
+
+
+def test_comment_requests_spaced_by_start_time(clock: _Clock):
+    """按发出时刻算间隔：上一个请求已经耗掉的时间不再重复等。"""
+    client = _http()
+    with _answer(client, _OK, _OK, _OK):
+        client.get_json(_MAIN)
+        clock.now += 0.3
+        client.get_json(_SUB)  # 主评论与二级评论共用一份间隔
+        clock.now += 2.0
+        client.get_json(_MAIN)
+    assert clock.slept == [0.7]
+
+
+def test_other_endpoints_not_throttled(clock: _Clock):
+    client = _http()
+    with _answer(client, _OK, _OK):
+        client.get_json("/x/web-interface/nav")
+        client.get_json("/x/web-interface/nav")
+    assert clock.slept == []
+
+
+def test_block_signal_opens_breaker_without_further_requests(clock: _Clock):
+    """被拦后换视频、换排序、重新登录都不通（10-06 实测），继续请求只会白白失败。"""
+    client = _http()
+    with _answer(client, _BLOCKED) as sent:
+        with pytest.raises(_RateLimited) as first:
+            client.get_json(_MAIN)
+        assert first.value.retry_in == 600
+        clock.now += 300
+        with pytest.raises(_RateLimited) as later:
+            client.get_json(_SUB)
+    assert sent.call_count == 1
+    assert later.value.signal == "-352"
+    assert later.value.describe("评论") == (
+        "评论接口被风控（-352），约 5 分钟后恢复，期间重试或重新登录都无效。"
+    )
+
+
+def test_breaker_leaves_other_endpoints_alone(clock: _Clock):
+    client = _http()
+    with _answer(client, _BLOCKED, _OK):
+        with pytest.raises(_RateLimited):
+            client.get_json(_MAIN)
+        assert client.get_json("/x/web-interface/wbi/search/type") == {}
+
+
+@pytest.mark.parametrize("probe, reopened", [(_OK, False), (_BLOCKED, True)])
+def test_breaker_probes_once_after_cooldown(clock: _Clock, probe: bytes, reopened: bool):
+    """到期放行一个请求试探：通过即解除，仍被拦再停 5 分钟。"""
+    client = _http()
+    with _answer(client, _BLOCKED, probe, _OK):
+        with pytest.raises(_RateLimited):
+            client.get_json(_MAIN)
+        clock.now += 600
+        if reopened:
+            with pytest.raises(_RateLimited) as info:
+                client.get_json(_MAIN)
+            assert info.value.retry_in == 300
+        else:
+            client.get_json(_MAIN)
+            client.get_json(_MAIN)
+
+
+def test_business_error_counts_as_reached(clock: _Clock):
+    """平台回了业务错误码（如稿件不可见）说明没被拦，试探算通过。"""
+    client = _http()
+    invisible = json.dumps({"code": 62002, "message": "稿件不可见"}).encode()
+    with _answer(client, _BLOCKED, invisible, _OK):
+        with pytest.raises(_RateLimited):
+            client.get_json(_MAIN)
+        clock.now += 600
+        with pytest.raises(BilibiliHttpError):
+            client.get_json(_MAIN)
+        client.get_json(_MAIN)
+
+
+def test_429_does_not_open_breaker(clock: _Clock):
+    """429 几秒到几十秒就恢复，熔断 10 分钟得不偿失。"""
+    client = _http()
+    hdrs = http.client.HTTPMessage()
+    exc = urllib.error.HTTPError(url="", code=429, msg="", hdrs=hdrs, fp=None)
+    with _answer(client, exc, _OK):  # type: ignore[arg-type]
+        with pytest.raises(_RateLimited) as info:
+            client.get_json(_SUB)
+        assert info.value.retry_in is None
+        client.get_json(_SUB)
+
+
+def test_partial_comments_carry_cooldown(clock: _Clock):
+    """中途被拦的部分结果同样打开熔断，提示里给出恢复时间。"""
+    client = _http()
+    first = json.dumps({"code": 0, "data": _page(
+        [_reply(1, "a")], is_end=False, next_offset="SESSION")}).encode()
+    with _nav_patch("_comments"), _SIGN_PATCH, _answer(client, first, _BLOCKED):
+        page = fetch_comments(client, aid=100, count=40)
+    assert page.rate_limited == (
+        "评论接口被风控（-352），只取到部分，约 10 分钟后用 next_cursor 续取。"
+    )
+    with pytest.raises(_RateLimited):
+        client.get_json(_MAIN)

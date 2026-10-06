@@ -15,7 +15,7 @@ from polylens_bilibili.client import (
     resolve_up,
     resolve_video,
 )
-from polylens_bilibili.errors import BilibiliError
+from polylens_bilibili.errors import BilibiliError, RateLimitedError
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 
@@ -343,3 +343,14 @@ def test_resolve_up_accepts_space_link_or_mid(text: str) -> None:
 def test_resolve_up_rejects_other_input() -> None:
     with pytest.raises(BilibiliError):
         resolve_up("高中物理老何")
+
+
+def test_comment_tools_refuse_while_breaker_open(comment_guard: Any) -> None:
+    """熔断期间连取视频信息的请求也不发。"""
+    comment_guard.failed("-352")
+    client = BilibiliClient()
+    with patch("polylens_bilibili.client.fetch_view", side_effect=AssertionError("不该发请求")):
+        with pytest.raises(RateLimitedError, match="约 10 分钟后恢复"):
+            client.get_comments("BV1xx", count=20)
+        with pytest.raises(RateLimitedError, match="约 10 分钟后恢复"):
+            client.get_comment_replies("BV1xx", comment_ids=["1"])
