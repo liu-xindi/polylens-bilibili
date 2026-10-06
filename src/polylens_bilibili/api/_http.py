@@ -17,7 +17,11 @@ _DEFAULT_REFERER = WEB_HOME
 
 
 class BilibiliHttpError(BilibiliError):
-    """平台返回非 0 业务码。消息为平台原文，不作解释。"""
+    """平台返回非 0 业务码。消息为平台原文，不作解释；code 留给调用方按能力改写提示。"""
+
+    def __init__(self, code: Any, message: Any) -> None:
+        super().__init__(f"接口返回失败: {code} {message}")
+        self.code = code
 
 
 class _RateLimited(Exception):
@@ -89,7 +93,7 @@ class HttpClient:
         if code in (-352, -509):
             raise _RateLimited()
         if code != 0 and (allow_codes is None or code not in allow_codes):
-            raise BilibiliHttpError(f"接口返回失败: {code} {payload.get('message')}")
+            raise BilibiliHttpError(code, payload.get("message"))
         data = payload.get("data")
         # 风控还有一种 code=0 的形态：data 里只剩 v_voucher 这张挑战票据，没有任何业务数据。
         # 不在这里判出来，调用方会把空手而归读成"没有结果"。

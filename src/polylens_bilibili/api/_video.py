@@ -11,7 +11,7 @@ from typing import Any
 from ..errors import BilibiliError
 from ..models import StaffMember, VideoInfo, VideoPart, space_url, to_local_time
 from ._constants import ENDPOINTS
-from ._http import HttpClient
+from ._http import BilibiliHttpError, HttpClient
 
 
 def _resolve_page(view: dict[str, Any], page: int) -> dict[str, Any]:
@@ -52,9 +52,24 @@ def clip_duration(view: dict[str, Any], cid: int) -> float | None:
     return float(dur) if dur else None
 
 
+# 平台对这几种情况只给"请求错误""啥都木有"之类的原文，看不出是视频号的问题
+_VIEW_ERRORS = {
+    -400: "视频号无效",
+    -404: "视频不存在",
+    62002: "视频不可见，可能已删除或未公开",
+}
+
+
 def fetch_view(client: HttpClient, params: dict[str, Any]) -> dict[str, Any]:
     """拉取视频原始 view 数据（含全部分段，与请求的是哪一段无关）。"""
-    return client.get_json(ENDPOINTS["video_info"], params)
+    try:
+        return client.get_json(ENDPOINTS["video_info"], params)
+    except BilibiliHttpError as e:
+        hint = _VIEW_ERRORS.get(e.code)
+        if hint is None:
+            raise
+        video_id = params.get("bvid") or f"av{params.get('aid')}"
+        raise BilibiliError(f"{hint}：{video_id}") from None
 
 
 def _summary_of(view: dict[str, Any]) -> str | None:

@@ -18,6 +18,7 @@ from polylens_bilibili.api._danmaku import fetch_danmaku, top_by_heat
 from polylens_bilibili.api._http import BilibiliHttpError, HttpClient, _RateLimited
 from polylens_bilibili.api._signing import NavInfo
 from polylens_bilibili.api._subtitles import fetch_subtitles
+from polylens_bilibili.api._video import fetch_view
 from polylens_bilibili.errors import AuthRequiredError, BilibiliError, RateLimitedError
 
 # ── 共用辅助 ────────────────────────────────────────────────────────────────
@@ -397,7 +398,7 @@ def test_fetch_replies_rejects_comment_of_another_video():
 def test_fetch_replies_isolates_failing_thread():
     def _get(endpoint, params):
         if params["root"] == 1:
-            raise BilibiliHttpError("接口返回失败: 12006 没有该评论")
+            raise BilibiliHttpError(12006, "没有该评论")
         return {"replies": [_reply(7, "ok")], "root": {"oid": 100}}
 
     client = MagicMock()
@@ -594,6 +595,34 @@ def test_get_json_business_error_is_polylens_error():
         with pytest.raises(BilibiliHttpError) as exc_info:
             client.get_json("/test")
     assert isinstance(exc_info.value, BilibiliError)
+    assert exc_info.value.code == -400
+    assert str(exc_info.value) == "接口返回失败: -400 请求错误"
+
+
+@pytest.mark.parametrize(
+    ("code", "message", "params", "expected"),
+    [
+        (-400, "请求错误", {"bvid": "BV123"}, "视频号无效：BV123"),
+        (-404, "啥都木有", {"aid": 999999999999}, "视频不存在：av999999999999"),
+        (62002, "稿件不可见", {"aid": 1}, "视频不可见，可能已删除或未公开：av1"),
+    ],
+)
+def test_fetch_view_explains_bad_video_id(code: int, message: str, params: dict, expected: str):
+    """平台原文看不出是视频号的问题，按业务码改写成指向视频号的提示。"""
+    client = _http()
+    raw = json.dumps({"code": code, "message": message}).encode()
+    with patch.object(client, "get_bytes", return_value=raw):
+        with pytest.raises(BilibiliError) as exc_info:
+            fetch_view(client, params)
+    assert str(exc_info.value) == expected
+
+
+def test_fetch_view_keeps_other_platform_errors():
+    client = _http()
+    raw = json.dumps({"code": -500, "message": "服务器错误"}).encode()
+    with patch.object(client, "get_bytes", return_value=raw):
+        with pytest.raises(BilibiliHttpError, match="-500 服务器错误"):
+            fetch_view(client, {"bvid": "BV1xx411c7mD"})
 
 
 def test_get_json_allow_codes_passes_through():
