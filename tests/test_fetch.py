@@ -409,12 +409,27 @@ def test_fetch_replies_isolates_failing_thread():
     assert out[1].page.items == [] and out[1].error is not None and "12006" in out[1].error
 
 
-def test_fetch_replies_rate_limited_raises():
+def test_fetch_replies_rate_limited_before_any_thread_raises():
     client = MagicMock()
     client.get_json.side_effect = _RateLimited("-352", "/x")
     with _nav_patch("_comments"):
-        with pytest.raises(RateLimitedError):
-            fetch_replies(client, 100, ["1"], limit=5)
+        with pytest.raises(RateLimitedError, match="-352"):
+            fetch_replies(client, 100, ["1", "2"], limit=5)
+
+
+def test_fetch_replies_interrupted_keeps_finished_threads():
+    """导出的记录里 429 两次把整批二级评论作废，已取完的那几条也跟着丢了。"""
+    client = MagicMock()
+    client.get_json.side_effect = [
+        {"replies": [_reply(1, "a")]},
+        _RateLimited("429", "/x"),
+    ]
+    with _nav_patch("_comments"):
+        out = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
+    assert [t.comment_id for t in out] == ["1", "2", "3"]
+    assert [c.content for c in out[0].page.items] == ["a"] and out[0].error is None
+    assert out[1].error == out[2].error == "二级评论抓取被平台限流（429），几秒后可重试。"
+    assert client.get_json.call_count == 2  # 被拦后不再请求后面的
 
 
 # ── fetch_subtitles ─────────────────────────────────────────────────────────

@@ -147,8 +147,10 @@ def fetch_replies(
 ) -> list[ReplyThread]:
     """按 comment_id 钻取二级评论。limit 是每条主评论只取前多少条；不传则全部取完。
 
-    内部串行，请求间隔由 HTTP 层统一控制；中途触发风控则抛 RateLimitedError，不返回半程结果。
+    内部串行，请求间隔由 HTTP 层统一控制。
     单条主评论取不到（评论不存在、不属于这个视频）只记在它的 error 上，不影响其他。
+    中途触发风控或限流即停：已取完的照常返回，被打断的与没轮到的在 error 里说明原因。
+    按页码取，结果可重放，留下已取完的没有副作用。一条都没取完才抛 RateLimitedError。
     二级评论接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
     """
     if limit is not None and limit < 1:
@@ -159,15 +161,21 @@ def fetch_replies(
     if not fetch_nav(client).is_login:
         raise AuthRequiredError("comment_replies")
     results: list[ReplyThread] = []
-    try:
-        for cid in comment_ids:
-            try:
-                page, withheld = _fetch_thread(client, aid, int(cid), limit)
-                results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
-            except BilibiliError as e:
-                results.append(ReplyThread(comment_id=cid, page=Page(items=[]), error=str(e)))
-    except _RateLimited as e:
-        raise RateLimitedError(e.describe("二级评论抓取")) from None
+    for i, cid in enumerate(comment_ids):
+        try:
+            page, withheld = _fetch_thread(client, aid, int(cid), limit)
+            results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
+        except BilibiliError as e:
+            results.append(ReplyThread(comment_id=cid, page=Page(items=[]), error=str(e)))
+        except _RateLimited as e:
+            reason = e.describe("二级评论抓取")
+            if not results:
+                raise RateLimitedError(reason) from None
+            results.extend(
+                ReplyThread(comment_id=rest, page=Page(items=[]), error=reason)
+                for rest in comment_ids[i:]
+            )
+            break
     return results
 
 
