@@ -22,6 +22,8 @@
 | `logout` | 退出登录 | — |
 | `start_qr_login` · `complete_qr_login` | 扫码登录 | — |
 
+`search_videos`、`list_up_videos`、`get_feed`、`get_parts`、`get_comments`、`get_comment_replies`、`get_subtitles` 接受可选的 `jq` 参数，在返回前筛选本批条目或只保留部分字段，例如字幕只要文本：`map(.content) | join("\n")`。
+
 ## 安装
 
 需要 [uv](https://docs.astral.sh/uv/)（自带 Python ≥ 3.13）与 git；视频帧另需本机安装 ffmpeg。

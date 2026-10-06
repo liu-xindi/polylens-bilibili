@@ -371,6 +371,82 @@ def test_unparsable_url_is_tool_error() -> None:
     assert result.isError
 
 
+# ── jq ──────────────────────────────────────────────────────────────────────
+
+
+def test_list_tools_accept_jq() -> None:
+    async def scenario() -> dict[str, Any]:
+        server = create_server_for_test()
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
+            await client.initialize()
+            return {t.name: t.inputSchema for t in (await client.list_tools()).tools}
+
+    schemas = _run(scenario)
+    with_jq = {name for name, schema in schemas.items() if "jq" in schema["properties"]}
+    assert with_jq == {
+        "search_videos", "list_up_videos", "get_feed", "get_comments", "get_subtitles",
+        "get_comment_replies", "get_parts",
+    }
+    subtitles_desc = schemas["get_subtitles"]["properties"]["jq"]["description"]
+    assert "start,end,content" in subtitles_desc
+    assert "用不到的字段：start（需要定位时间时保留）、end；" in subtitles_desc
+    assert "用不到的字段" not in schemas["get_parts"]["properties"]["jq"]["description"]
+
+
+def test_get_comments_jq_keeps_count_and_paging() -> None:
+    page = Page(items=[_comment("1", "a"), _comment("2", "b")], has_more=True, next_cursor="tok")
+    with _with_client(get_comments=page):
+        payload = _payload(
+            "get_comments",
+            {"url": BV_URL, "count": 2, "jq": '[.[] | select(.content == "b") | {id, content}]'},
+        )
+    assert payload["count"] == 2
+    assert payload["jq_count"] == 1
+    assert payload["comments"] == "comments[1]{id,content}:\n  \"2\",b"
+    assert payload["has_more"] is True
+    assert payload["next_cursor"] == "tok"
+
+
+def test_get_comment_replies_jq_runs_per_thread() -> None:
+    threads = [
+        ReplyThread("1", Page(items=[_comment("11", "x"), _comment("12", "y")])),
+        ReplyThread("2", Page(items=[_comment("21", "z")])),
+    ]
+    with _with_client(get_comment_replies=threads):
+        payload = _payload(
+            "get_comment_replies",
+            {"url": BV_URL, "comment_ids": ["1", "2"], "jq": "[.[] | .content]"},
+        )
+    assert [r["replies"] for r in payload["results"]] == ['["x","y"]', '["z"]']
+    assert [r["jq_count"] for r in payload["results"]] == [2, 1]
+
+
+def test_get_subtitles_jq_text_only() -> None:
+    entries = [SubtitleEntry(start=1.0, end=2.0, content="一句"),
+               SubtitleEntry(start=3.0, end=4.0, content="二句")]
+    with _with_client(get_subtitles=SubtitleTrack(entries, "ai-zh", ["ai-zh"])):
+        payload = _payload(
+            "get_subtitles", {"url": BV_URL, "jq": 'map(.content) | join("\\n")'}
+        )
+    assert payload["subtitles"] == "一句\n二句"
+    assert payload["count"] == 2
+    assert payload["jq_count"] is None
+
+
+def test_without_jq_jq_count_is_null() -> None:
+    with _with_client(get_feed=[]):
+        payload = _payload("get_feed")
+    assert payload["jq_count"] is None
+
+
+def test_bad_jq_is_tool_error_with_fields() -> None:
+    parts = [VideoPart(page=1, part="片头", duration=60.0)]
+    with _with_client(get_parts=parts):
+        result = _call("get_parts", {"url": BV_URL, "jq": ".["})
+    assert result.isError
+    assert "page,part,duration" in result.content[0].text
+
+
 # ── elapsed_s ───────────────────────────────────────────────────────────────
 
 
@@ -525,7 +601,7 @@ def test_get_feed_takes_no_url() -> None:
             return tools["get_feed"].inputSchema
 
     schema = _run(scenario)
-    assert schema.get("properties", {}) == {}
+    assert set(schema.get("properties", {})) == {"jq"}
 
 
 def test_get_feed_empty_batch() -> None:

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -27,6 +27,11 @@ def to_local_time(ts: int | None) -> str | None:
     if not ts:
         return None
     return datetime.fromtimestamp(ts, tz=UTC).astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def bulky(use: str = "") -> dict[str, str]:
+    """字段 metadata：体积大、多数任务用不到，写进 jq 参数说明。use 写何时仍需要它。"""
+    return {"bulky": use}
 
 
 def _toon_needs_quote(s: str) -> bool:
@@ -133,17 +138,18 @@ class Comment:
 
     id: str
     author: str
-    author_url: str | None  # 评论者空间链接，可传给 get_up_info / list_up_videos
+    # 评论者空间链接，可传给 get_up_info / list_up_videos
+    author_url: str | None = field(metadata=bulky("查看评论者资料时需要"))
     author_level: int | None  # 评论者的账号等级 0~6
-    is_up: bool  # 评论者是该视频的 UP 主本人
+    is_up: bool = field(metadata=bulky())  # 评论者是该视频的 UP 主本人
     ip_location: str | None  # IP 属地（省份或国家）；较早的评论平台不给
     content: str
     like_count: int
     reply_count: int
     parent_id: str | None  # 被回复的那条评论 id；仅楼中楼"互回"时出现（回楼主则为 None）
-    created_at: str | None  # 本机时区可读时间（见 to_local_time）
-    is_top: bool  # 置顶评论
-    up_liked: bool  # UP 主给这条点过赞
+    created_at: str | None = field(metadata=bulky())  # 本机时区可读时间（见 to_local_time）
+    is_top: bool = field(metadata=bulky())  # 置顶评论
+    up_liked: bool = field(metadata=bulky())  # UP 主给这条点过赞
     image_urls: str | None  # 配图地址，多张以空格分隔
     link_titles: str | None  # content 里的链接对应的标题，多个以空格分隔
 
@@ -162,14 +168,15 @@ class SearchItem:
     """搜索结果的一条。url 可直接传给内容类工具。"""
 
     title: str
-    url: str
+    url: str = field(metadata=bulky("后续调用其他工具时需要"))
     author: str | None
-    author_url: str | None  # UP 主空间链接，可传给 list_up_videos
+    # UP 主空间链接，可传给 list_up_videos
+    author_url: str | None = field(metadata=bulky("查看 UP 主时需要"))
     published_at: str | None  # 本机时区可读时间
     duration_sec: float | None  # 时长秒数（平台给的是"总分钟:秒"文本，已换算）
     category: str | None  # 分区名
-    tags: str | None  # 标签，逗号分隔
-    summary: str | None  # 简介，平台截断在约 250 字
+    tags: str | None = field(metadata=bulky())  # 标签，逗号分隔
+    summary: str | None = field(metadata=bulky())  # 简介，平台截断在约 250 字
     view_count: int | None
     danmaku_count: int | None
     comment_count: int | None
@@ -182,9 +189,9 @@ class FeedItem:
     """首页推荐流的一条。url 可直接传给内容类工具。"""
 
     title: str
-    url: str
+    url: str = field(metadata=bulky("后续调用其他工具时需要"))
     author: str | None
-    author_url: str | None  # UP 主空间链接
+    author_url: str | None = field(metadata=bulky("查看 UP 主时需要"))  # UP 主空间链接
     published_at: str | None  # 本机时区可读时间
     duration_sec: float | None  # 时长秒数
     view_count: int | None
@@ -198,7 +205,7 @@ class UpVideoItem:
     """UP 主投稿列表的一条。url 可直接传给内容类工具。"""
 
     title: str
-    url: str
+    url: str = field(metadata=bulky("后续调用其他工具时需要"))
     published_at: str | None  # 本机时区可读时间
     duration_sec: float | None  # 时长秒数
     view_count: int | None
@@ -210,8 +217,8 @@ class UpVideoItem:
 class SubtitleEntry:
     """一条字幕。时间轴单位为秒，保留一位小数。"""
 
-    start: float
-    end: float
+    start: float = field(metadata=bulky("需要定位时间时保留"))
+    end: float = field(metadata=bulky())
     content: str
 
 

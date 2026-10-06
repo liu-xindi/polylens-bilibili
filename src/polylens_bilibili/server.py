@@ -12,6 +12,7 @@ import io
 import json
 import time
 from collections.abc import Callable
+from dataclasses import fields
 from typing import Annotated, Any, Literal
 
 import segno
@@ -21,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from .client import BilibiliClient, resolve_up, resolve_video
 from .credentials import delete_cookie, load_cookie, save_cookie
+from .jqfilter import encode_items
 from .models import (
     Comment,
     Danmaku,
@@ -43,6 +45,28 @@ _PAGE_DESC = (
 )
 _CURSOR_DESC = "续取游标：不传从头开始，回传上次返回的 next_cursor 取下一批。"
 
+# 评论只有两层，楼中楼回复的 reply_count 恒为 0
+_REPLY_EXCLUDE = frozenset({"reply_count"})
+
+
+def _jq_desc(item_type: type, *, paged: bool, exclude: frozenset[str] = frozenset()) -> str:
+    shown = [f for f in fields(item_type) if f.name not in exclude]
+    columns = ",".join(f.name for f in shown)
+    bulky = "、".join(
+        f.name + (f"（{f.metadata['bulky']}）" if f.metadata["bulky"] else "")
+        for f in shown
+        if "bulky" in f.metadata
+    )
+    paging = "分页字段不在输入里；只筛本批，筛完为空时仍以 has_more 判断有无下一批。"
+    return (
+        f"可选的 jq 表达式。输入是本批条目组成的数组，每条字段：{columns}。"
+        + (f"体积大、多数任务用不到的字段：{bulky}；特定任务需要时照常使用。" if bulky else "")
+        + (paging if paged else "")
+        + "结果为同键对象数组时编成表格，单个字符串原样返回，其他形状给 JSON；"
+        "jq_count 是结果数组的元素数。"
+    )
+
+
 # ── 返回模型 ────────────────────────────────────────────────────────────────
 #
 # 这些模型只声明结构，不写字段说明。outputSchema 的字段描述不进模型上下文
@@ -59,6 +83,7 @@ class CommentsResult(BaseModel):
     video_id: str
     count: int
     comments: str
+    jq_count: int | None = None
     has_more: bool
     next_cursor: str | None = None
     message: str | None = None
@@ -68,6 +93,7 @@ class CommentsResult(BaseModel):
 class ReplyThreadItem(BaseModel):
     comment_id: str
     replies: str
+    jq_count: int | None = None
     has_more: bool
     withheld: int = 0
 
@@ -91,6 +117,7 @@ class SubtitlesResult(BaseModel):
     lang: str | None = None
     available_langs: list[str] = Field(default_factory=list)
     subtitles: str
+    jq_count: int | None = None
     elapsed_s: float | None = None
 
 
@@ -98,12 +125,14 @@ class PartsResult(BaseModel):
     video_id: str
     count: int
     parts: str
+    jq_count: int | None = None
     elapsed_s: float | None = None
 
 
 class SearchResult(BaseModel):
     count: int
     results: str
+    jq_count: int | None = None
     has_more: bool
     next_cursor: str | None = None
     elapsed_s: float | None = None
@@ -121,6 +150,7 @@ class UpVideosResult(BaseModel):
     total: int
     count: int
     videos: str
+    jq_count: int | None = None
     has_more: bool
     next_cursor: str | None = None
     elapsed_s: float | None = None
@@ -133,6 +163,7 @@ class UpInfoResult(UpInfo):
 class FeedResult(BaseModel):
     count: int
     feed: str
+    jq_count: int | None = None
     elapsed_s: float | None = None
 
 
@@ -289,14 +320,20 @@ def create_server(
                 )
             ),
         ] = "hot",
+        jq: Annotated[
+            str | None,
+            Field(description=_jq_desc(Comment, paged=True)),
+        ] = None,
     ) -> CommentsResult:
         """不含楼中楼，楼中楼通过 get_comment_replies 获取。需要登录。(video comments)"""
         video_id, _ = _resolve(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
+        comments, jq_count = encode_items("comments", page.items, Comment, jq)
         return CommentsResult(
             video_id=video_id,
             count=len(page.items),
-            comments=to_toon("comments", page.items, Comment),
+            comments=comments,
+            jq_count=jq_count,
             has_more=page.has_more,
             next_cursor=page.next_cursor,
             message=(
@@ -320,6 +357,13 @@ def create_server(
                 )
             ),
         ] = None,
+        jq: Annotated[
+            str | None,
+            Field(
+                description=_jq_desc(Comment, paged=False, exclude=_REPLY_EXCLUDE)
+                + "每个楼的 replies 分别执行。"
+            ),
+        ] = None,
     ) -> CommentRepliesResult:
         """回复按时间正序排列。需要登录。
 
@@ -331,21 +375,21 @@ def create_server(
         """
         video_id, _ = _resolve(url)
         threads = _client().get_comment_replies(video_id, comment_ids=comment_ids, limit=limit)
-        return CommentRepliesResult(
-            video_id=video_id,
-            results=[
+        results = []
+        for t in threads:
+            replies, jq_count = encode_items(
+                "replies", t.page.items, Comment, jq, exclude=_REPLY_EXCLUDE
+            )
+            results.append(
                 ReplyThreadItem(
                     comment_id=t.comment_id,
-                    # 评论只有两层，楼中楼回复的 reply_count 恒为 0
-                    replies=to_toon(
-                        "replies", t.page.items, Comment, exclude=frozenset({"reply_count"})
-                    ),
+                    replies=replies,
+                    jq_count=jq_count,
                     has_more=t.page.has_more,
                     withheld=t.withheld,
                 )
-                for t in threads
-            ],
-        )
+            )
+        return CommentRepliesResult(video_id=video_id, results=results)
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
@@ -386,6 +430,10 @@ def create_server(
                 )
             ),
         ] = None,
+        jq: Annotated[
+            str | None,
+            Field(description=_jq_desc(SubtitleEntry, paged=False)),
+        ] = None,
     ) -> SubtitlesResult:
         """逐句返回。需要登录。字幕可能为 AI 生成或机器翻译，存在误差。
 
@@ -393,26 +441,34 @@ def create_server(
         """
         video_id, part = _resolve(url, page)
         track = _client().get_subtitles(video_id, part, lang)
+        subtitles, jq_count = encode_items("subtitles", track.entries, SubtitleEntry, jq)
         return SubtitlesResult(
             video_id=video_id,
             count=len(track.entries),
             lang=track.lang,
             available_langs=track.available_langs,
-            subtitles=to_toon("subtitles", track.entries, SubtitleEntry),
+            subtitles=subtitles,
+            jq_count=jq_count,
         )
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
     def get_parts(
         url: Annotated[str, Field(description=_URL_DESC)],
+        jq: Annotated[
+            str | None,
+            Field(description=_jq_desc(VideoPart, paged=False)),
+        ] = None,
     ) -> PartsResult:
         """即分 P。单段视频返回一项。(video parts, pages)"""
         video_id, _ = _resolve(url)
         parts = _client().get_parts(video_id)
+        encoded, jq_count = encode_items("parts", parts, VideoPart, jq)
         return PartsResult(
             video_id=video_id,
             count=len(parts),
-            parts=to_toon("parts", parts, VideoPart),
+            parts=encoded,
+            jq_count=jq_count,
         )
 
     # structured_output=False：FastMCP 默认会把返回值复制进 structuredContent，对本工具即把图片的
@@ -450,6 +506,10 @@ def create_server(
             Literal["relevance", "newest", "most_viewed", "most_danmaku", "most_favorited"],
             Field(description="排序。relevance 是 B 站的综合排序。"),
         ] = "relevance",
+        jq: Annotated[
+            str | None,
+            Field(description=_jq_desc(SearchItem, paged=True)),
+        ] = None,
     ) -> SearchResult:
         """每批最多 30 条。
 
@@ -459,9 +519,11 @@ def create_server(
         (search videos, find video by keyword)
         """
         page = _client().search(query=query, cursor=cursor, order=order)
+        results, jq_count = encode_items("results", page.items, SearchItem, jq)
         return SearchResult(
             count=len(page.items),
-            results=to_toon("results", page.items, SearchItem),
+            results=results,
+            jq_count=jq_count,
             has_more=page.has_more,
             next_cursor=page.next_cursor,
         )
@@ -495,6 +557,10 @@ def create_server(
             str | None,
             Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。"),
         ] = None,
+        jq: Annotated[
+            str | None,
+            Field(description=_jq_desc(UpVideoItem, paged=True)),
+        ] = None,
     ) -> UpVideosResult:
         """每批最多 40 条。total 是视频总数，带 keyword 时为匹配数。
 
@@ -504,12 +570,14 @@ def create_server(
         author, total, page = _client().get_up_videos(
             mid, cursor=cursor, order=order, keyword=keyword
         )
+        videos, jq_count = encode_items("videos", page.items, UpVideoItem, jq)
         return UpVideosResult(
             author=author,
             author_url=f"https://space.bilibili.com/{mid}",
             total=total,
             count=len(page.items),
-            videos=to_toon("videos", page.items, UpVideoItem),
+            videos=videos,
+            jq_count=jq_count,
             has_more=page.has_more,
             next_cursor=page.next_cursor,
         )
@@ -530,13 +598,19 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
-    def get_feed() -> FeedResult:
+    def get_feed(
+        jq: Annotated[
+            str | None,
+            Field(description=_jq_desc(FeedItem, paged=False)),
+        ] = None,
+    ) -> FeedResult:
         """B 站首页推荐流，每批最多 30 条。
 
         (homepage feed, recommendations, browse)
         """
         items = _client().get_feed()
-        return FeedResult(count=len(items), feed=to_toon("feed", items, FeedItem))
+        feed, jq_count = encode_items("feed", items, FeedItem, jq)
+        return FeedResult(count=len(items), feed=feed, jq_count=jq_count)
 
     @mcp.tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:
