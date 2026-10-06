@@ -250,7 +250,7 @@ def create_server(
         url: Annotated[str, Field(description=_URL_DESC)],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> VideoInfoResult:
-        """获取视频的标题、作者、发布时间、简介与各项统计。
+        """含标题、作者、发布时间、简介与各项统计。
 
         统计口径：评论数含楼中楼回复；弹幕数与整片时长是全部分段之和，
         当前段时长只算这一段。
@@ -285,7 +285,7 @@ def create_server(
             ),
         ] = "hot",
     ) -> CommentsResult:
-        """获取视频的主评论，不含楼中楼。需要登录。(video comments)"""
+        """不含楼中楼，楼中楼通过 get_comment_replies 获取。需要登录。(video comments)"""
         video_id, _ = _resolve(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
         return CommentsResult(
@@ -313,7 +313,7 @@ def create_server(
             ),
         ] = None,
     ) -> CommentRepliesResult:
-        """按主评论 id 钻取楼中楼，回复按时间正序排列。需要登录。
+        """回复按时间正序排列。需要登录。
 
         withheld 是整个楼里平台不肯给出的回复条数，不随 limit 变化。
         parent_id 为空表示直接回复主评论，否则是所回复的那条楼中楼回复的 id。
@@ -355,7 +355,7 @@ def create_server(
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> DanmakuResult:
-        """获取视频弹幕。(danmaku, bullet comments)"""
+        """(danmaku, bullet comments)"""
         video_id, part = _resolve(url, page)
         bullets = _client().get_danmaku(video_id, count=count, page=part)
         return DanmakuResult(
@@ -379,7 +379,7 @@ def create_server(
             ),
         ] = None,
     ) -> SubtitlesResult:
-        """获取视频字幕，逐句返回。需要登录。字幕可能为 AI 生成或机器翻译，存在误差。
+        """逐句返回。需要登录。字幕可能为 AI 生成或机器翻译，存在误差。
 
         (subtitles, captions, transcript)
         """
@@ -398,7 +398,7 @@ def create_server(
     def get_parts(
         url: Annotated[str, Field(description=_URL_DESC)],
     ) -> PartsResult:
-        """列出多段视频（分 P）的全部分段。单段视频返回一项。(video parts, pages)"""
+        """即分 P。单段视频返回一项。(video parts, pages)"""
         video_id, _ = _resolve(url)
         parts = _client().get_parts(video_id)
         return PartsResult(
@@ -418,9 +418,7 @@ def create_server(
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
     ) -> list[ImageContent | TextContent]:
-        """截取视频指定时刻的一帧，返回内联 JPEG 图片。需要登录。
-
-        运行本服务的机器需装有 ffmpeg。
+        """返回内联 JPEG 图片。需要登录。
 
         (video frame, screenshot)
         """
@@ -445,10 +443,10 @@ def create_server(
             Field(description="排序。relevance 是 B 站的综合排序。"),
         ] = "relevance",
     ) -> SearchResult:
-        """按关键词搜索 B 站视频，每批最多 30 条。
+        """每批最多 30 条。
 
         结果已滤掉付费课程，一批可能不满 30 条。summary 是平台截断过的简介，
-        完整简介用 get_video_info 取。
+        完整简介通过 get_video_info 获取。
 
         (search videos, find video by keyword)
         """
@@ -465,7 +463,7 @@ def create_server(
     def suggest_keywords(
         term: Annotated[str, Field(description="已输入的关键词，可以只是开头几个字。")],
     ) -> SuggestResult:
-        """给出 B 站搜索框的联想建议词，最多 10 条。
+        """B 站搜索框的联想词，最多 10 条。
 
         平台联想时会忽略 + # 等符号。
 
@@ -490,7 +488,7 @@ def create_server(
             Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。"),
         ] = None,
     ) -> UpVideosResult:
-        """列出 UP 主的投稿视频，每批 40 条。total 是视频总数，带 keyword 时为匹配数。
+        """每批最多 40 条。total 是视频总数，带 keyword 时为匹配数。
 
         (uploader videos, channel uploads, other videos by this author)
         """
@@ -515,7 +513,7 @@ def create_server(
             str, Field(description="UP 主空间链接（其他工具返回的 author_url），或数字 mid。")
         ],
     ) -> UpInfoResult:
-        """获取 UP 主资料：昵称、签名、等级、粉丝数、关注数、投稿数、总获赞、认证、大会员等。
+        """含昵称、签名、等级、粉丝数、关注数、投稿数、总获赞、认证、大会员等。
 
         (uploader profile, channel info, followers)
         """
@@ -525,7 +523,7 @@ def create_server(
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
     def get_feed() -> FeedResult:
-        """刷 B 站首页推荐流，每批最多 30 条。
+        """B 站首页推荐流，每批最多 30 条。
 
         (homepage feed, recommendations, browse)
         """
@@ -534,7 +532,7 @@ def create_server(
 
     @mcp.tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:
-        """联网查询当前是否已登录B站。
+        """联网向平台核验。
 
         is_login 为 null 表示无法验证，与 false 不同。
 
@@ -544,7 +542,7 @@ def create_server(
 
     @mcp.tool(annotations=_LOCAL_ONLY)
     def logout() -> LogoutResult:
-        """退出登录。(log out, sign out)"""
+        """删除本地保存的凭据。(log out, sign out)"""
         deleted = delete_cookie()
         return LogoutResult(
             deleted=deleted,
@@ -554,7 +552,10 @@ def create_server(
     # structured_output=False 同 get_frame：二维码内联返回，不进结构化通道。
     @mcp.tool(structured_output=False, annotations=_READS_PLATFORM)
     def start_qr_login() -> list[ImageContent | TextContent]:
-        """发起扫码登录，返回内联二维码图片。(QR code login)"""
+        """返回内联二维码图片。不写入本地凭据，由 complete_qr_login 写入。
+
+        (QR code login)
+        """
         session = BilibiliClient().start_qr_login()
         meta = {
             "key": session.key,
