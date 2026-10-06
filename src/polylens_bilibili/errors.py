@@ -12,7 +12,7 @@ class AuthRequiredError(BilibiliError):
 
     def __init__(self, capability: str) -> None:
         super().__init__(
-            f"能力 {capability} 需要登录。用 start_qr_login 扫码登录后重试。"
+            "需要登录。用 start_qr_login 扫码登录后重试。"
         )
         self.capability = capability
 

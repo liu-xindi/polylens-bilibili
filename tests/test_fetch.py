@@ -215,7 +215,7 @@ def test_fetch_comments_rate_limited_midway_returns_partial():
     with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=40)
     assert [c.content for c in page.items] == ["a"]
-    assert page.rate_limited == "评论触发风控（-352），只取到部分，可直接用 next_cursor 续取。"
+    assert page.rate_limited == "评论触发风控（-352），只取到部分，可以用 next_cursor 续取。"
     assert page.has_more is True and page.next_cursor == "SESSION"
 
 
@@ -428,7 +428,7 @@ def test_fetch_replies_interrupted_keeps_finished_threads():
         out = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
     assert [t.comment_id for t in out] == ["1", "2", "3"]
     assert [c.content for c in out[0].page.items] == ["a"] and out[0].error is None
-    assert out[1].error == out[2].error == "二级评论抓取触发风控（429），可直接重试。"
+    assert out[1].error == out[2].error == "二级评论抓取被平台限流（429），可以重试。"
     assert client.get_json.call_count == 2  # 被拦后不再请求后面的
 
 
@@ -605,10 +605,11 @@ def test_get_json_raises_rate_limited_on_risk_codes(code: int):
 
 
 def test_rate_limited_message_carries_signal():
-    """只有 412 实测过持续封禁，其余信号按可直接重试报。"""
+    """只有 412 实测过持续封禁，其余信号按可以重试报；429 称限流。"""
     assert _RateLimited("412", "/x").describe("搜索") == "搜索触发风控（412），稍后重试。"
-    for signal in ("429", "-352", "-509", "v_voucher"):
-        expected = f"搜索触发风控（{signal}），可直接重试。"
+    assert _RateLimited("429", "/x").describe("搜索") == "搜索被平台限流（429），可以重试。"
+    for signal in ("-352", "-509", "v_voucher"):
+        expected = f"搜索触发风控（{signal}），可以重试。"
         assert _RateLimited(signal, "/x").describe("搜索") == expected
     assert "412" in str(_RateLimited("412", "/x"))  # 没被能力接住时直接报出的那句
 
@@ -1079,23 +1080,23 @@ def test_business_error_counts_as_reached(clock: _Clock):
     json.dumps({"code": 0, "data": {"v_voucher": "x"}}).encode(),
 ])
 def test_only_412_opens_breaker(clock: _Clock, answer: Any):
-    """只有 412 实测过持续封禁；其余信号熔断 15 分钟得不偿失，按可直接重试报。"""
+    """只有 412 实测过持续封禁；其余信号熔断 15 分钟得不偿失，按可以重试报。"""
     client = _http()
     with _answer(client, answer, _OK):
         with pytest.raises(_RateLimited) as info:
             client.get_json(_SUB)
         assert info.value.retry_in is None
-        assert info.value.describe("评论").endswith("可直接重试。")
+        assert info.value.describe("评论").endswith("可以重试。")
         client.get_json(_SUB)
 
 
 def test_comment_requests_capped_per_minute(clock: _Clock):
-    """任意 60 秒内最多 20 页：两次实测都是每秒一页、约 50 页时被拦。"""
+    """任意 60 秒内最多 30 页：每分钟 60 页时第 52 页被拦，40 页连续 10 分钟未触发。"""
     client = _http()
-    with _answer(client, *[_OK] * 21):
-        for _ in range(21):
+    with _answer(client, *[_OK] * 31):
+        for _ in range(31):
             client.get_json(_MAIN)
-    assert clock.slept == [1.0] * 19 + [41.0]
+    assert clock.slept == [1.0] * 29 + [31.0]
 
 
 def test_partial_comments_carry_cooldown(clock: _Clock):
