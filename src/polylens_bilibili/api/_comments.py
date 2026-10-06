@@ -196,8 +196,14 @@ def fetch_comments(
 
     cursor=None 从头；count 为想要条数的下限（实际可能略多，整页对齐以保 cursor 续取不丢）。
 
-    两种排序的游标性质不同：热度序的游标里只装了 session_id，位置由平台按会话维护，
-    同一游标重复取会往前走；时间序的游标带位置，可重放。
+    两种排序的游标性质不同。热度序的游标只装会话 key，翻页时平台回的 next_offset 恒等于它，
+    进度记在平台侧：同一游标每次请求都返回下一批，换连接也一样，取过的批次重取不到。
+    同一账号对同一视频的多个热度序会话互相干扰：新开一个会话后，旧游标的结果会退回前几页
+    或与已取过的重叠；平台也不校验 key，伪造的 key 照样返回数据。不同视频之间互不影响。
+    时间序的游标带位置，可重放，不受新会话影响。
+
+    中途触发风控时返回已取到的部分并标 rate_limited：热度序下这些页平台已记为取过，
+    丢掉它们，调用方用同一游标重试也取不回来。一页都没取到才抛 RateLimitedError。
 
     到底只认平台给的信号：标了 is_end、返回空页、或没有下一页游标。不按"这页不满 20 条"
     推断，那是错的：第一页有置顶评论时平台只给 19 条常规评论，中途页也出现过 19 条。
@@ -241,6 +247,8 @@ def fetch_comments(
             if offset is not None and len(comments) < want:
                 time.sleep(_MAIN_PAGE_DELAY)
     except _RateLimited:
-        raise RateLimitedError("触发风控，稍后重试。") from None
+        if not comments:
+            raise RateLimitedError("触发风控，稍后重试。") from None
+        return Page(items=comments, has_more=True, next_cursor=offset, rate_limited=True)
 
     return Page(items=comments, has_more=offset is not None, next_cursor=offset)

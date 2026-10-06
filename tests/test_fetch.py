@@ -203,6 +203,20 @@ def test_fetch_comments_stops_on_is_end():
     assert page.has_more is False and page.next_cursor is None
 
 
+def test_fetch_comments_rate_limited_midway_returns_partial():
+    """热度序下已取回的页平台已记为取过，丢掉就再也取不回，故带着游标返回。"""
+    client = MagicMock()
+    client.get_json.side_effect = [
+        _page([_reply(1, "a")], is_end=False, next_offset="SESSION"),
+        _RateLimited(),
+    ]
+    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
+        page = fetch_comments(client, aid=100, count=40)
+    assert [c.content for c in page.items] == ["a"]
+    assert page.rate_limited is True
+    assert page.has_more is True and page.next_cursor == "SESSION"
+
+
 def test_fetch_comments_requires_login():
     """未登录时平台只给几条并声称到底，故取数据前就拦住。"""
     client = MagicMock()
@@ -554,24 +568,6 @@ def test_get_json_non412_http_error_reraises():
 
 
 # ── fetch_comments 的风控处理 ───────────────────────────────────────────────
-
-
-def test_fetch_comments_rate_limited_midpagination_raises():
-    """翻页中途触发风控 → 抛 RateLimitedError，不返回半程结果。"""
-    call_count = 0
-
-    def _get_json(endpoint, params):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 2:
-            raise _RateLimited()
-        return _full_page(call_count)
-
-    client = MagicMock()
-    client.get_json.side_effect = _get_json
-    with _nav_patch("_comments"), _SIGN_PATCH, _SLEEP_PATCH:
-        with pytest.raises(RateLimitedError):
-            fetch_comments(client, aid=100, count=100)
 
 
 def test_fetch_comments_rate_limited_on_first_page_raises():

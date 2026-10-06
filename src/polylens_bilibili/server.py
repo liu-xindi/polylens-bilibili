@@ -61,6 +61,7 @@ class CommentsResult(BaseModel):
     comments: str
     has_more: bool
     next_cursor: str | None = None
+    message: str | None = None
     elapsed_s: float | None = None
 
 
@@ -279,8 +280,12 @@ def create_server(
             Field(
                 description=(
                     "排序方式：hot 是平台的综合排序。"
-                    "hot 的游标绑在一次翻页过程上，中断后无法从原处接续，"
-                    "重复用同一个游标会继续往后走；newest 的游标是位置标识，可以重复取到同一批。"
+                    "hot 的 cursor 只标识浏览会话，进度记在平台侧，"
+                    "同一 cursor 每次调用都返回下一批，不能重放某一批；"
+                    "对同一视频不传 cursor 重新开始 hot，此前 hot cursor 的进度会退回开头附近，"
+                    "之后返回的是已取过的内容。"
+                    "newest 按时间倒序，cursor 含位置，可重复取同一批，不受新会话影响。"
+                    "需要完整抓取或断点续取时用 newest。"
                 )
             ),
         ] = "hot",
@@ -294,6 +299,9 @@ def create_server(
             comments=to_toon("comments", page.items, Comment),
             has_more=page.has_more,
             next_cursor=page.next_cursor,
+            message=(
+                "触发风控，只取到部分评论，稍后用 next_cursor 续取。" if page.rate_limited else None
+            ),
         )
 
     @mcp.tool(annotations=_READS_PLATFORM)
