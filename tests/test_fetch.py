@@ -1001,8 +1001,8 @@ def test_block_signal_opens_breaker_without_further_requests(clock: _Clock):
     with _answer(client, _BLOCKED) as sent:
         with pytest.raises(_RateLimited) as first:
             client.get_json(_MAIN)
-        assert first.value.retry_in == 600
-        clock.now += 300
+        assert first.value.retry_in == 900
+        clock.now += 600
         with pytest.raises(_RateLimited) as later:
             client.get_json(_SUB)
     assert sent.call_count == 1
@@ -1022,19 +1022,37 @@ def test_breaker_leaves_other_endpoints_alone(clock: _Clock):
 
 @pytest.mark.parametrize("probe, reopened", [(_OK, False), (_BLOCKED, True)])
 def test_breaker_probes_once_after_cooldown(clock: _Clock, probe: bytes, reopened: bool):
-    """到期放行一个请求试探：通过即解除，仍被拦再停 5 分钟。"""
+    """到期放行一个请求试探：通过即解除，仍被拦再停 2 分钟。"""
     client = _http()
     with _answer(client, _BLOCKED, probe, _OK):
         with pytest.raises(_RateLimited):
             client.get_json(_MAIN)
-        clock.now += 600
+        clock.now += 900
         if reopened:
             with pytest.raises(_RateLimited) as info:
                 client.get_json(_MAIN)
-            assert info.value.retry_in == 300
+            assert info.value.retry_in == 120
         else:
             client.get_json(_MAIN)
             client.get_json(_MAIN)
+
+
+def test_breaker_keeps_rechecking_every_two_minutes(clock: _Clock):
+    client = _http()
+    with _answer(client, _BLOCKED, _BLOCKED, _BLOCKED, _OK) as sent:
+        with pytest.raises(_RateLimited):
+            client.get_json(_MAIN)
+        clock.now += 900
+        for _ in range(2):
+            with pytest.raises(_RateLimited) as info:
+                client.get_json(_MAIN)
+            assert info.value.retry_in == 120
+            clock.now += 60
+            with pytest.raises(_RateLimited):
+                client.get_json(_MAIN)  # 两次试探之间仍在本地拒绝
+            clock.now += 60
+        client.get_json(_MAIN)
+    assert sent.call_count == 4
 
 
 def test_business_error_counts_as_reached(clock: _Clock):
@@ -1044,7 +1062,7 @@ def test_business_error_counts_as_reached(clock: _Clock):
     with _answer(client, _BLOCKED, invisible, _OK):
         with pytest.raises(_RateLimited):
             client.get_json(_MAIN)
-        clock.now += 600
+        clock.now += 900
         with pytest.raises(BilibiliHttpError):
             client.get_json(_MAIN)
         client.get_json(_MAIN)
@@ -1070,7 +1088,7 @@ def test_partial_comments_carry_cooldown(clock: _Clock):
     with _nav_patch("_comments"), _SIGN_PATCH, _answer(client, first, _BLOCKED):
         page = fetch_comments(client, aid=100, count=40)
     assert page.rate_limited == (
-        "评论接口触发风控（-352），只取到部分，约 10 分钟后用 next_cursor 续取。"
+        "评论接口触发风控（-352），只取到部分，约 15 分钟后用 next_cursor 续取。"
     )
     with pytest.raises(_RateLimited):
         client.get_json(_MAIN)
