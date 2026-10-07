@@ -42,7 +42,7 @@
 接入 Claude Code：
 
 ```bash
-claude mcp add polylens-bilibili -- uvx polylens-bilibili
+claude mcp add polylens-bilibili -- uvx polylens-bilibili-mcp
 ```
 
 接入 Claude Desktop，在 `claude_desktop_config.json` 中加入：
@@ -52,7 +52,7 @@ claude mcp add polylens-bilibili -- uvx polylens-bilibili
   "mcpServers": {
     "polylens-bilibili": {
       "command": "uvx",
-      "args": ["polylens-bilibili"]
+      "args": ["polylens-bilibili-mcp"]
     }
   }
 }
@@ -65,7 +65,7 @@ claude mcp add polylens-bilibili -- uvx polylens-bilibili
 ```bash
 git clone https://github.com/liu-xindi/polylens-bilibili.git
 cd polylens-bilibili && uv sync
-claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bilibili polylens-bilibili
+claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bilibili polylens-bilibili-mcp
 ```
 
 升级：`git pull && uv sync`。
@@ -78,7 +78,7 @@ claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bi
 POLYLENS_BILIBILI_TRANSPORT=http \
 POLYLENS_BILIBILI_PUBLIC_URL=https://example.com \
 POLYLENS_BILIBILI_AUTH_SECRET='<口令>' \
-uvx polylens-bilibili
+uvx polylens-bilibili-mcp
 ```
 
 然后在 claude.ai 添加连接器，URL 填 `https://example.com/mcp`，首次授权时在同意页输入上面的口令。

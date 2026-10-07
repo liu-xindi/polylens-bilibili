@@ -122,6 +122,11 @@ def test_http_sessions_are_not_reaped_when_idle() -> None:
     assert mcp.session_manager.session_idle_timeout is None
 
 
+def test_version_read_from_installed_distribution() -> None:
+    """包名与 version() 的参数不一致时会落到兜底的 0.0.0。"""
+    assert __version__ != "0.0.0"
+
+
 def test_server_reports_own_version() -> None:
     mcp = create_server()
     options = mcp._mcp_server.create_initialization_options()

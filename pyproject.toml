@@ -1,5 +1,5 @@
 [project]
-name = "polylens-bilibili"
+name = "polylens-bilibili-mcp"
 version = "0.2.1"
 description = "读取 B 站视频、评论、弹幕、字幕等公开信息的 MCP 服务，支持用 jq 在返回前筛选和裁剪结果。MCP server for reading Bilibili videos, comments, danmaku and subtitles, with jq filtering to keep responses small."
 readme = "README.md"
@@ -34,6 +34,8 @@ Issues = "https://github.com/liu-xindi/polylens-bilibili/issues"
 Changelog = "https://github.com/liu-xindi/polylens-bilibili/releases"
 
 [project.scripts]
+polylens-bilibili-mcp = "polylens_bilibili.__main__:main"
+# 改名前的命令，已有部署仍在用。
 polylens-bilibili = "polylens_bilibili.__main__:main"
 
 [build-system]
