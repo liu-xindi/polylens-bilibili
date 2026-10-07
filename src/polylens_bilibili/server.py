@@ -338,7 +338,11 @@ def create_server(
         ] = "hot",
         jq: Annotated[
             str | None,
-            Field(description=_jq_desc(Comment, paged=True)),
+            Field(
+                description=_jq_desc(Comment, paged=True)
+                + "hot 下若还要续取，不要用 jq 截取条数（如 .[:N]）："
+                "续取从整批之后开始，截掉的评论取不回。"
+            ),
         ] = None,
     ) -> CommentsResult:
         """不含二级评论，二级评论通过 get_comment_replies 获取。需要登录。
