@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from polylens_bilibili import serve
+from polylens_bilibili import __version__, serve
 from polylens_bilibili.server import create_server
 
 
@@ -120,6 +120,12 @@ def test_http_sessions_are_not_reaped_when_idle() -> None:
     mcp = create_server()
     mcp.streamable_http_app()
     assert mcp.session_manager.session_idle_timeout is None
+
+
+def test_server_reports_own_version() -> None:
+    mcp = create_server()
+    options = mcp._mcp_server.create_initialization_options()
+    assert options.server_version == __version__
 
 
 def _no_run(monkeypatch: pytest.MonkeyPatch) -> list[str]:

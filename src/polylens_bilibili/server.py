@@ -20,6 +20,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .client import BilibiliClient, resolve_up, resolve_video
 from .credentials import delete_cookie, load_cookie, save_cookie
 from .jqfilter import encode_items
@@ -282,6 +283,8 @@ def create_server(
         session_idle_timeout=None,
         **net,
     )
+    # FastMCP 1.x 不收 version，不设时握手报的是 mcp 库自身的版本。
+    mcp._mcp_server.version = __version__
 
     if oauth_provider is not None and auth_secret:
         from .oauth import register_consent_route
