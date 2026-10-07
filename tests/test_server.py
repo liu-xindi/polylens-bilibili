@@ -308,6 +308,7 @@ def test_get_frame_returns_inline_image_and_meta() -> None:
     assert meta["video_id"] == "BV1xx411c7mD"
     assert meta["page"] == 1
     assert meta["elapsed_s"] >= 0
+    assert next(iter(meta)) == "elapsed_s"
 
 
 def test_get_frame_emits_no_structured_content() -> None:
@@ -473,7 +474,9 @@ def test_content_tools_attach_elapsed_s(
     tool: str, args: dict[str, Any], behaviour: dict[str, Any]
 ) -> None:
     with _with_client(**behaviour):
-        assert _payload(tool, args)["elapsed_s"] >= 0
+        payload = _payload(tool, args)
+    assert payload["elapsed_s"] >= 0
+    assert next(iter(payload)) == "elapsed_s"
 
 
 def test_login_tools_have_no_elapsed_s() -> None:

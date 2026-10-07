@@ -81,11 +81,15 @@ def _jq_desc(
 # description 与参数说明里；outputSchema 保留下来只作校验契约。
 
 
-class VideoInfoResult(VideoInfo):
+class _Timed(BaseModel):
     elapsed_s: float | None = None
 
 
-class CommentsResult(BaseModel):
+class VideoInfoResult(VideoInfo, _Timed):
+    pass
+
+
+class CommentsResult(_Timed):
     video_id: str
     count: int
     comments: str
@@ -93,7 +97,6 @@ class CommentsResult(BaseModel):
     has_more: bool
     next_cursor: str | None = None
     message: str | None = None
-    elapsed_s: float | None = None
 
 
 class ReplyThreadItem(BaseModel):
@@ -105,53 +108,47 @@ class ReplyThreadItem(BaseModel):
     error: str | None = None
 
 
-class CommentRepliesResult(BaseModel):
+class CommentRepliesResult(_Timed):
     video_id: str
     results: list[ReplyThreadItem]
-    elapsed_s: float | None = None
 
 
-class DanmakuResult(BaseModel):
+class DanmakuResult(_Timed):
     video_id: str
     count: int
     danmaku: str
-    elapsed_s: float | None = None
 
 
-class SubtitlesResult(BaseModel):
+class SubtitlesResult(_Timed):
     video_id: str
     count: int
     lang: str | None = None
     available_langs: list[str] = Field(default_factory=list)
     subtitles: str
     jq_count: int | None = None
-    elapsed_s: float | None = None
 
 
-class PartsResult(BaseModel):
+class PartsResult(_Timed):
     video_id: str
     count: int
     parts: str
     jq_count: int | None = None
-    elapsed_s: float | None = None
 
 
-class SearchResult(BaseModel):
+class SearchResult(_Timed):
     count: int
     results: str
     jq_count: int | None = None
     has_more: bool
     next_cursor: str | None = None
-    elapsed_s: float | None = None
 
 
-class SuggestResult(BaseModel):
+class SuggestResult(_Timed):
     count: int
     suggestions: list[str]
-    elapsed_s: float | None = None
 
 
-class UpVideosResult(BaseModel):
+class UpVideosResult(_Timed):
     author: str | None
     author_url: str
     total: int
@@ -160,18 +157,16 @@ class UpVideosResult(BaseModel):
     jq_count: int | None = None
     has_more: bool
     next_cursor: str | None = None
-    elapsed_s: float | None = None
 
 
-class UpInfoResult(UpInfo):
-    elapsed_s: float | None = None
+class UpInfoResult(UpInfo, _Timed):
+    pass
 
 
-class FeedResult(BaseModel):
+class FeedResult(_Timed):
     count: int
     feed: str
     jq_count: int | None = None
-    elapsed_s: float | None = None
 
 
 class LoginStateResult(BaseModel):
@@ -221,8 +216,7 @@ def _attach_elapsed(result: Any, elapsed_s: float) -> Any:
         for i in range(len(result) - 1, -1, -1):
             if getattr(result[i], "type", None) != "text":
                 continue
-            meta = json.loads(result[i].text)
-            meta["elapsed_s"] = elapsed_s
+            meta = {"elapsed_s": elapsed_s, **json.loads(result[i].text)}
             result[i] = TextContent(type="text", text=json.dumps(meta, ensure_ascii=False))
             break
     return result
