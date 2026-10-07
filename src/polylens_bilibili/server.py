@@ -68,7 +68,7 @@ def _jq_desc(
         f"可选的 jq 表达式。输入是{scope}组成的数组，每条字段：{columns}。"
         + (f"体积大、多数任务用不到的字段：{bulky}；特定任务需要时照常使用。" if bulky else "")
         + (paging if paged else "")
-        + "结果为单个字符串时原样返回。"
+        + "结果为字符串时原样返回，其他结果编码为表格或 JSON；结果为数组时 jq_count 是其长度。"
     )
 
 
@@ -331,7 +331,12 @@ def create_server(
             Field(description=_jq_desc(Comment, paged=True)),
         ] = None,
     ) -> CommentsResult:
-        """不含二级评论，二级评论通过 get_comment_replies 获取。需要登录。(video comments)"""
+        """不含二级评论，二级评论通过 get_comment_replies 获取。需要登录。
+
+        image_urls、link_titles 是字符串，多个时以换行分隔。
+
+        (video comments)
+        """
         video_id, _ = _resolve(url)
         page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
         comments, jq_count = encode_items("comments", page.items, Comment, jq)
@@ -380,6 +385,7 @@ def create_server(
         parent_id 为空表示直接回复主评论，否则是所回复的那条二级评论的 id。
         parent_id 指向的二级评论不在列表里时，那条被平台隐藏了，取不到。
         结果缓存 10 分钟，cached_at 是缓存的抓取时间。
+        image_urls、link_titles 是字符串，多个时以换行分隔。
 
         (comment replies, sub-replies, thread)
         """

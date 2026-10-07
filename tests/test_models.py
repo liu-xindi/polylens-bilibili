@@ -118,16 +118,17 @@ def test_comments_toon_optional_columns_stay_when_batch_has_none() -> None:
 
 
 def test_comments_toon_carries_images_and_link_titles() -> None:
-    """配图与链接标题各占一列，多个值以空格分隔。"""
-    row = to_toon(
+    """配图与链接标题各占一列，多个值以换行分隔，编码后仍在同一行。"""
+    lines = to_toon(
         "comments",
-        [_comment(is_top=True, up_liked=True, image_urls="http://a.jpg http://b.jpg",
-                  link_titles="标题一 标题二")],
+        [_comment(is_top=True, up_liked=True, image_urls="http://a.jpg\nhttp://b.jpg",
+                  link_titles="黑神话 | 钟馗\n游科 访谈")],
         Comment,
-    ).split("\n")[1]
-    assert "true,true" in row
-    assert "http://a.jpg http://b.jpg" in row
-    assert "标题一 标题二" in row
+    ).split("\n")
+    assert len(lines) == 2
+    assert "true,true" in lines[1]
+    assert '"http://a.jpg\\nhttp://b.jpg"' in lines[1]
+    assert '"黑神话 | 钟馗\\n游科 访谈"' in lines[1]
 
 
 def test_danmaku_toon_keeps_zero_timestamp() -> None:

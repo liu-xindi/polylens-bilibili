@@ -151,8 +151,8 @@ class Comment:
     created_at: str | None = field(metadata=bulky())  # 本机时区可读时间（见 to_local_time）
     is_top: bool = field(metadata=bulky())  # 置顶评论
     up_liked: bool = field(metadata=bulky())  # UP 主给这条点过赞
-    image_urls: str | None  # 配图地址，多张以空格分隔
-    link_titles: str | None  # content 里的链接对应的标题，多个以空格分隔
+    image_urls: str | None  # 配图地址，多张以换行分隔
+    link_titles: str | None  # content 里的链接对应的标题，多个以换行分隔
 
 
 @dataclass(slots=True)

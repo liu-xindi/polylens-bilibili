@@ -22,7 +22,8 @@ from ._signing import fetch_nav, sign_params
 
 
 def _joined(values: list[str]) -> str | None:
-    return " ".join(values) or None
+    """以换行连接：链接标题常含空格和 |，换行不会出现在标题与 URL 里。"""
+    return "\n".join(values) or None
 
 
 def _image_urls(content: dict[str, Any]) -> str | None:

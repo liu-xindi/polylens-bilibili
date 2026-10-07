@@ -457,7 +457,7 @@ def test_normalize_reply_collects_image_urls():
             {"img_width": 1},
         ],
     }))
-    assert c.image_urls == "http://a.jpg http://b.jpg"
+    assert c.image_urls == "http://a.jpg\nhttp://b.jpg"
 
 
 def test_normalize_reply_takes_link_titles_from_jump_url():
