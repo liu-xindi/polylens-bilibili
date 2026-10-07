@@ -96,6 +96,7 @@ class CommentsResult(_Timed):
     jq_count: int | None = None
     has_more: bool
     next_cursor: str | None = None
+    cached_at: str | None = None
     message: str | None = None
 
 
@@ -105,6 +106,7 @@ class ReplyThreadItem(BaseModel):
     jq_count: int | None = None
     has_more: bool
     withheld: int = 0
+    cached_at: str | None = None
     error: str | None = None
 
 
@@ -319,6 +321,7 @@ def create_server(
                     "之后返回的是已取过的内容。"
                     "newest 按时间倒序，cursor 含位置，可重复取同一批，不受新会话影响。"
                     "需要完整抓取或断点续取时用 newest。"
+                    "newest 的结果缓存 10 分钟，cached_at 是缓存的抓取时间。"
                 )
             ),
         ] = "hot",
@@ -338,6 +341,7 @@ def create_server(
             jq_count=jq_count,
             has_more=page.has_more,
             next_cursor=page.next_cursor,
+            cached_at=page.cached_at,
             message=page.rate_limited,
         )
 
@@ -373,6 +377,7 @@ def create_server(
         中途被风控或限流时，已取完的照常返回，其余的 error 里说明原因。
         parent_id 为空表示直接回复主评论，否则是所回复的那条二级评论的 id。
         parent_id 指向的二级评论不在列表里时，那条被平台隐藏了，取不到。
+        结果缓存 10 分钟，cached_at 是缓存的抓取时间。
 
         (comment replies, sub-replies, thread)
         """
@@ -390,6 +395,7 @@ def create_server(
                     jq_count=jq_count,
                     has_more=t.page.has_more,
                     withheld=t.withheld,
+                    cached_at=t.page.cached_at,
                     error=t.error,
                 )
             )

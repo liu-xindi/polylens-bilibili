@@ -127,6 +127,7 @@ class Page[Item]:
     has_more: bool = False
     next_cursor: str | None = None
     rate_limited: str | None = None  # 中途触发风控时给调用方的说明；有值时这批只有风控前取到的部分
+    cached_at: str | None = None  # 这批用到缓存时，缓存里最早一页的抓取时间
 
 
 @dataclass(slots=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.cookiejar
 import json
 import logging
@@ -186,6 +187,8 @@ class HttpClient:
     def __init__(self, cookie: str = "", timeout: int = 20) -> None:
         self.api_base = API_BASE.rstrip("/")
         self.cookie = cookie.strip()
+        # 区分账号的缓存键，不必留 cookie 原文
+        self.account = hashlib.sha256(self.cookie.encode()).hexdigest()[:16]
         self.timeout = timeout
         self._jar = http.cookiejar.CookieJar()
         self._opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(self._jar))

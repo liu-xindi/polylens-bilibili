@@ -175,7 +175,8 @@ class BilibiliClient:
     def get_comments(
         self, video_id: str, *, count: int, cursor: str | None = None, sort: str = "hot"
     ) -> Page[Comment]:
-        _comments_open()
+        if sort != "newest":
+            _comments_open()
         _info, aid, _cid = build_video_info(self._view(video_id))
         return fetch_comments(self._http, aid, count=count, cursor=cursor, sort=sort)
 
@@ -188,7 +189,6 @@ class BilibiliClient:
     ) -> list[ReplyThread]:
         if not comment_ids:
             return []
-        _comments_open()
         _info, aid, _cid = build_video_info(self._view(video_id))
         return fetch_replies(self._http, aid, [str(c) for c in comment_ids], limit=limit)
 
@@ -253,7 +253,7 @@ class BilibiliClient:
 
 
 def _comments_open() -> None:
-    """评论组熔断中直接报错，连取视频信息的请求也省掉。"""
+    """评论组熔断中直接报错，连取视频信息的请求也省掉。只用于不走缓存的热度序。"""
     try:
         check_comments_open()
     except _RateLimited as e:

@@ -345,12 +345,10 @@ def test_resolve_up_rejects_other_input() -> None:
         resolve_up("高中物理老何")
 
 
-def test_comment_tools_refuse_while_breaker_open(comment_guard: Any) -> None:
-    """熔断期间连取视频信息的请求也不发。"""
+def test_hot_comments_refuse_while_breaker_open(comment_guard: Any) -> None:
+    """热度序不走缓存，熔断期间连取视频信息的请求也不发。"""
     comment_guard.failed("412")
     client = BilibiliClient()
     with patch("polylens_bilibili.client.fetch_view", side_effect=AssertionError("不该发请求")):
         with pytest.raises(RateLimitedError, match="约 15 分钟后再试"):
             client.get_comments("BV1xx", count=20)
-        with pytest.raises(RateLimitedError, match="约 15 分钟后再试"):
-            client.get_comment_replies("BV1xx", comment_ids=["1"])

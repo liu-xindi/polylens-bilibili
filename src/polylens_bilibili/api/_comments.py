@@ -8,12 +8,15 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from typing import Any
+from collections.abc import Callable, Hashable
+from functools import partial
+from typing import Any, NamedTuple
 
 from ..errors import AuthRequiredError, BilibiliError, RateLimitedError
 from ..models import Comment, Page, ReplyThread, space_url, to_local_time
 from ._constants import ENDPOINTS, REPLY_PAGE_SIZE
 from ._http import HttpClient, _RateLimited
+from ._page_cache import page_cache
 from ._search import _int_or_none
 from ._signing import fetch_nav, sign_params
 
@@ -104,38 +107,76 @@ def _withheld_count(data: dict[str, Any]) -> int:
     return max(0, declared - listable)
 
 
+class _ThreadPage(NamedTuple):
+    replies: list[Comment]
+    withheld: int
+
+
+class _MainPage(NamedTuple):
+    top: list[Comment]
+    replies: list[Comment]
+    next_offset: str | None  # None 表示到底
+
+
+def _replayable[P: (_ThreadPage, _MainPage)](
+    key: Hashable, fetch: Callable[[], P]
+) -> tuple[P, int | None]:
+    """先查缓存，未命中再请求。返回页与命中时的抓取时刻；空页可能是平台临时异常，不缓存。"""
+    hit = page_cache.get(key)
+    if hit is not None:
+        return hit.value, hit.fetched_at
+    page = fetch()
+    if page.replies:
+        page_cache.put(key, page)
+    return page, None
+
+
+def _oldest(a: int | None, b: int | None) -> int | None:
+    return b if a is None else a if b is None else min(a, b)
+
+
+def _fetch_thread_page(client: HttpClient, aid: int, root_id: int, pn: int) -> _ThreadPage:
+    data = client.get_json(
+        ENDPOINTS["replies_sub"],
+        {"oid": aid, "type": 1, "root": root_id, "ps": REPLY_PAGE_SIZE, "pn": pn},
+    ) or {}
+    owner = (data.get("root") or {}).get("oid")
+    if isinstance(owner, int) and owner != aid:
+        # 平台按 root 定位主评论，不校验 oid：别的视频的评论 id 照样返回数据
+        raise BilibiliError(f"评论 {root_id} 不属于这个视频")
+    upper_mid = _upper_mid(data)
+    replies = [
+        _normalize_reply(raw, root_id=root_id, upper_mid=upper_mid)
+        for raw in data.get("replies") or []
+    ]
+    return _ThreadPage(replies, _withheld_count(data))
+
+
 def _fetch_thread(
     client: HttpClient, aid: int, root_id: int, limit: int | None
 ) -> tuple[Page[Comment], int]:
     """从头取某主评论二级评论的前 limit 条；limit 为 None 时一直翻到最后一页。"""
     pn = 1
-    collected: list[dict[str, Any]] = []
+    collected: list[Comment] = []
     reached_end = False
     withheld = 0
-    upper_mid: int | None = None
+    fetched_at: int | None = None
     while limit is None or len(collected) < limit:
-        data = client.get_json(
-            ENDPOINTS["replies_sub"],
-            {"oid": aid, "type": 1, "root": root_id, "ps": REPLY_PAGE_SIZE, "pn": pn},
-        ) or {}
-        owner = (data.get("root") or {}).get("oid")
-        if isinstance(owner, int) and owner != aid:
-            # 平台按 root 定位主评论，不校验 oid：别的视频的评论 id 照样返回数据
-            raise BilibiliError(f"评论 {root_id} 不属于这个视频")
-        page = data.get("replies") or []
-        withheld = _withheld_count(data)
-        upper_mid = _upper_mid(data)
-        collected.extend(page)
-        if len(page) < REPLY_PAGE_SIZE:
+        page, hit_at = _replayable(
+            ("sub", client.account, aid, root_id, pn),
+            partial(_fetch_thread_page, client, aid, root_id, pn),
+        )
+        fetched_at = _oldest(fetched_at, hit_at)
+        withheld = page.withheld
+        collected.extend(page.replies)
+        if len(page.replies) < REPLY_PAGE_SIZE:
             reached_end = True
             break
         pn += 1
     window = collected if limit is None else collected[:limit]
-    replies = [
-        _normalize_reply(raw, root_id=root_id, upper_mid=upper_mid) for raw in window
-    ]
     has_more = len(window) < len(collected) or not reached_end
-    return Page(items=replies, has_more=has_more), withheld
+    page = Page(items=window, has_more=has_more, cached_at=to_local_time(fetched_at))
+    return page, withheld
 
 
 def fetch_replies(
@@ -200,7 +241,7 @@ _SORT_MODE = {"hot": 3, "newest": 2}
 
 def _fetch_main_page(
     client: HttpClient, aid: int, img_key: str, sub_key: str, offset: str, mode: int
-) -> dict[str, Any]:
+) -> _MainPage:
     """取一页主评论（WBI 签名）。翻页与终止判断交给 fetch_comments。"""
     params: dict[str, Any] = {
         "oid": aid,
@@ -210,7 +251,17 @@ def _fetch_main_page(
         "plat": 1,
     }
     signed = sign_params(params, img_key, sub_key, anti_risk=True)
-    return client.get_json(ENDPOINTS["replies_main"], signed) or {}
+    data = client.get_json(ENDPOINTS["replies_main"], signed) or {}
+    upper_mid = _upper_mid(data)
+    cur = data.get("cursor") or {}
+    next_offset = None if cur.get("is_end") else (
+        (cur.get("pagination_reply") or {}).get("next_offset") or None
+    )
+    return _MainPage(
+        top=[_normalize_reply(raw, upper_mid=upper_mid) for raw in data.get("top_replies") or []],
+        replies=[_normalize_reply(raw, upper_mid=upper_mid) for raw in data.get("replies") or []],
+        next_offset=next_offset,
+    )
 
 
 def fetch_comments(
@@ -229,7 +280,7 @@ def fetch_comments(
     进度记在平台侧：同一游标每次请求都返回下一批，换连接也一样，取过的批次重取不到。
     同一账号对同一视频的多个热度序会话互相干扰：新开一个会话后，旧游标的结果会退回前几页
     或与已取过的重叠；平台也不校验 key，伪造的 key 照样返回数据。不同视频之间互不影响。
-    时间序的游标带位置，可重放，不受新会话影响。
+    时间序的游标带位置，可重放，不受新会话影响；因此时间序的页走缓存，热度序不走。
 
     中途触发风控时返回已取到的部分并标 rate_limited：热度序下这些页平台已记为取过，
     丢掉它们，调用方用同一游标重试也取不回来。一页都没取到才抛 RateLimitedError。
@@ -255,32 +306,33 @@ def fetch_comments(
     # 若改成先推进再抓，游标会停在已经取回的那页上，调用方续取时重复拿到同一批。
     offset: str | None = cursor or ""
     first_page = not cursor  # 置顶评论只在从头的第一页出现
+    fetched_at: int | None = None
 
     try:
         while offset is not None and len(comments) < want:
-            data = _fetch_main_page(client, aid, nav.img_key, nav.sub_key, offset, mode)
-            replies = data.get("replies") or []
-            if not replies:
+            fetch = partial(_fetch_main_page, client, aid, nav.img_key, nav.sub_key, offset, mode)
+            if sort == "newest":
+                page, hit_at = _replayable(("main", client.account, aid, mode, offset), fetch)
+                fetched_at = _oldest(fetched_at, hit_at)
+            else:
+                page = fetch()
+            if not page.replies:
                 offset = None
                 break
-            upper_mid = _upper_mid(data)
             if first_page:
                 first_page = False
-                for raw in data.get("top_replies") or []:
-                    comments.append(_normalize_reply(raw, upper_mid=upper_mid))
-            for raw in replies:
-                comments.append(_normalize_reply(raw, upper_mid=upper_mid))
-            cur = data.get("cursor") or {}
-            if cur.get("is_end"):
-                offset = None
-                break
-            offset = (cur.get("pagination_reply") or {}).get("next_offset") or None
+                comments.extend(page.top)
+            comments.extend(page.replies)
+            offset = page.next_offset
     except _RateLimited as e:
         if not comments:
             raise RateLimitedError(e.describe("评论")) from None
         return Page(
             items=comments, has_more=True, next_cursor=offset,
-            rate_limited=e.describe_partial("评论"),
+            rate_limited=e.describe_partial("评论"), cached_at=to_local_time(fetched_at),
         )
 
-    return Page(items=comments, has_more=offset is not None, next_cursor=offset)
+    return Page(
+        items=comments, has_more=offset is not None, next_cursor=offset,
+        cached_at=to_local_time(fetched_at),
+    )

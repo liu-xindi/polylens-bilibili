@@ -1111,3 +1111,113 @@ def test_partial_comments_carry_cooldown(clock: _Clock):
     )
     with pytest.raises(_RateLimited):
         client.get_json(_MAIN)
+
+
+# ── 评论页缓存 ──────────────────────────────────────────────────────────────
+
+
+class _Platform:
+    """按游标或页码作答的假平台，记下每次请求。"""
+
+    def __init__(self, pages: int = 30) -> None:
+        self.pages = pages
+        self.calls: list[Any] = []
+
+    def __call__(self, endpoint, params):
+        if "pn" in params:
+            self.calls.append(("sub", params["root"], params["pn"]))
+            return _sub_page(endpoint, params)
+        offset = json.loads(params["pagination_str"])["offset"]
+        self.calls.append(("main", params["mode"], offset))
+        seq = int(offset.removeprefix("offset") or 0) + 1
+        return _full_page(seq, is_end=seq == self.pages)
+
+
+def _cached_client(platform: _Platform, account: str = "a") -> MagicMock:
+    client = MagicMock()
+    client.account = account
+    client.get_json.side_effect = platform
+    return client
+
+
+def test_newest_pages_replayed_from_cache():
+    platform = _Platform()
+    client = _cached_client(platform)
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        first = fetch_comments(client, aid=100, count=600, sort="newest")
+        assert len(platform.calls) == 30 and first.cached_at is None
+        again = fetch_comments(client, aid=100, count=400, sort="newest")
+    assert len(platform.calls) == 30
+    assert again.items == first.items[:400]
+    assert again.next_cursor == "offset20"
+    assert again.cached_at is not None
+
+
+def test_newest_fetches_only_pages_not_cached():
+    platform = _Platform()
+    client = _cached_client(platform)
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(client, aid=100, count=400, sort="newest")
+        page = fetch_comments(client, aid=100, count=600, sort="newest")
+    assert [c[2] for c in platform.calls[20:]] == [f"offset{i}" for i in range(20, 30)]
+    assert len(page.items) == 600
+
+
+def test_hot_never_cached():
+    platform = _Platform(pages=1)
+    client = _cached_client(platform)
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(client, aid=100, count=20, sort="hot")
+        page = fetch_comments(client, aid=100, count=20, sort="hot")
+    assert len(platform.calls) == 2 and page.cached_at is None
+
+
+def test_cache_not_shared_across_accounts():
+    platform = _Platform(pages=1)
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(_cached_client(platform, "a"), aid=100, count=20, sort="newest")
+        fetch_comments(_cached_client(platform, "b"), aid=100, count=20, sort="newest")
+    assert len(platform.calls) == 2
+
+
+def test_empty_page_not_cached():
+    client = MagicMock()
+    client.get_json.return_value = _page([])
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(client, aid=100, count=20, sort="newest")
+        fetch_comments(client, aid=100, count=20, sort="newest")
+    assert client.get_json.call_count == 2
+
+
+def test_replies_replayed_from_cache():
+    platform = _Platform()
+    client = _cached_client(platform)
+    with _nav_patch("_comments"):
+        first = fetch_replies(client, 100, ["555"], limit=50)
+        again = fetch_replies(client, 100, ["555"], limit=30)
+    assert platform.calls == [("sub", 555, 1), ("sub", 555, 2), ("sub", 555, 3)]
+    assert again[0].page.items == first[0].page.items[:30]
+    assert first[0].page.cached_at is None and again[0].page.cached_at is not None
+
+
+def test_reply_of_another_video_not_cached():
+    client = MagicMock()
+    client.get_json.return_value = {"root": {"oid": 999}, "replies": [_reply(1, "x")]}
+    with _nav_patch("_comments"):
+        fetch_replies(client, 100, ["555"])
+        out = fetch_replies(client, 100, ["555"])
+    assert client.get_json.call_count == 2 and out[0].error
+
+
+def test_cached_pages_served_while_breaker_open(comment_guard: Any):
+    platform = _Platform(pages=1)
+    client = _http()
+    with _nav_patch("_comments"), _SIGN_PATCH, patch.object(
+        client, "_get_json", side_effect=lambda path, params, *_: platform(path, params)
+    ):
+        fetch_comments(client, aid=100, count=20, sort="newest")
+        comment_guard.failed("412")
+        page = fetch_comments(client, aid=100, count=20, sort="newest")
+        with pytest.raises(RateLimitedError):
+            fetch_comments(client, aid=200, count=20, sort="newest")
+    assert len(page.items) == 20 and len(platform.calls) == 1
