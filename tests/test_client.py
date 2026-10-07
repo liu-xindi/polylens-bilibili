@@ -140,7 +140,7 @@ def test_comment_replies_with_empty_ids_returns_empty(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         BilibiliClient, "_view", lambda self, vid: called.append(1) or {}  # type: ignore[func-returns-value]
     )
-    assert BilibiliClient().get_comment_replies("BV1xx", comment_ids=[], limit=5) == []
+    assert BilibiliClient().get_comment_replies("BV1xx", comment_ids=[], pages=1) == []
     assert not called
 
 

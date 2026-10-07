@@ -105,6 +105,7 @@ class ReplyThreadItem(BaseModel):
     replies: str
     jq_count: int | None = None
     has_more: bool
+    total: int | None = None
     withheld: int = 0
     cached_at: str | None = None
     error: str | None = None
@@ -353,14 +354,14 @@ def create_server(
             list[str],
             Field(description="主评论 id 列表，从 get_comments 返回的 comments 表里取。"),
         ],
-        limit: Annotated[
-            int | None,
-            Field(
-                description=(
-                    "每条主评论只取最早的多少条二级评论，has_more 表示被截断。不传则全部取完。"
-                )
-            ),
-        ] = None,
+        pages: Annotated[
+            int,
+            Field(description="每条主评论取几页，每页 20 条。has_more 表示后面还有。"),
+        ],
+        start_page: Annotated[
+            int,
+            Field(description="每条主评论从第几页开始，1 起。"),
+        ] = 1,
         jq: Annotated[
             str | None,
             Field(
@@ -372,7 +373,8 @@ def create_server(
     ) -> CommentRepliesResult:
         """二级评论按时间正序排列。需要登录。
 
-        withheld 是该主评论下平台未列出的二级评论条数（已删除或被折叠），不随 limit 变化。
+        total 是该主评论下平台能列出的二级评论总数，可用来算页数。
+        withheld 是该主评论下平台未列出的二级评论条数（已删除或被折叠）。
         某条主评论取不到（评论不存在、不属于这个视频）时只在它的 error 里说明，其他照常返回。
         中途被风控或限流时，已取完的照常返回，其余的 error 里说明原因。
         parent_id 为空表示直接回复主评论，否则是所回复的那条二级评论的 id。
@@ -382,7 +384,9 @@ def create_server(
         (comment replies, sub-replies, thread)
         """
         video_id, _ = _resolve(url)
-        threads = _client().get_comment_replies(video_id, comment_ids=comment_ids, limit=limit)
+        threads = _client().get_comment_replies(
+            video_id, comment_ids=comment_ids, start_page=start_page, pages=pages
+        )
         results = []
         for t in threads:
             replies, jq_count = encode_items(
@@ -394,6 +398,7 @@ def create_server(
                     replies=replies,
                     jq_count=jq_count,
                     has_more=t.page.has_more,
+                    total=t.total,
                     withheld=t.withheld,
                     cached_at=t.page.cached_at,
                     error=t.error,

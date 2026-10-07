@@ -176,12 +176,12 @@ def test_fetch_comments_rejects_non_positive_count(bad: int):
     client.get_json.assert_not_called()
 
 
-@pytest.mark.parametrize("bad", [0, -3])
-def test_fetch_replies_rejects_non_positive_limit(bad: int):
+@pytest.mark.parametrize("args", [{"start_page": 0, "pages": 1}, {"pages": 0}, {"pages": -3}])
+def test_fetch_replies_rejects_non_positive_pages(args: dict):
     client = MagicMock()
     with _nav_patch("_comments"):
         with pytest.raises(BilibiliError):
-            fetch_replies(client, 100, ["1"], limit=bad)
+            fetch_replies(client, 100, ["1"], **args)
     client.get_json.assert_not_called()
 
 
@@ -243,23 +243,11 @@ def test_fetch_replies_marks_up_from_upper():
         "replies": [_reply(1, "up", mid=42), _reply(2, "fan")], "upper": {"mid": 42},
     }
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"])
+        out = fetch_replies(client, 100, ["555"], pages=1)
     assert [c.is_up for c in out[0].page.items] == [True, False]
 
 
-def test_fetch_replies_slices_window_by_limit():
-    client = MagicMock()
-    client.get_json.side_effect = _sub_page
-    with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], limit=5)
-    t = out[0]
-    assert t.comment_id == "555"
-    assert len(t.page.items) == 5
-    assert t.page.has_more is True  # 满页还有更多
-
-
-def test_fetch_replies_limit_beyond_page_size_accumulates():
-    """limit=50 而平台单页 20 → 内部翻 3 页凑满，窗口精确。"""
+def test_fetch_replies_reads_requested_pages():
     seen_pn: list[int] = []
 
     def _get_json(endpoint, params):
@@ -269,15 +257,15 @@ def test_fetch_replies_limit_beyond_page_size_accumulates():
     client = MagicMock()
     client.get_json.side_effect = _get_json
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], limit=50)
+        out = fetch_replies(client, 100, ["555"], start_page=2, pages=3)
     t = out[0]
-    assert len(t.page.items) == 50
-    assert seen_pn == [1, 2, 3]
-    assert t.page.items[0].content == "r0" and t.page.items[49].content == "r49"
-    assert t.page.has_more is True
+    assert t.comment_id == "555"
+    assert seen_pn == [2, 3, 4]
+    assert t.page.items[0].content == "r20" and t.page.items[-1].content == "r79"
+    assert t.page.has_more is True  # 满页且不知总数
 
 
-def test_fetch_replies_without_limit_reads_whole_thread():
+def test_fetch_replies_stops_at_short_page():
     seen_pn: list[int] = []
     sized = _make_sized_sub_page({555: 45})
 
@@ -288,12 +276,29 @@ def test_fetch_replies_without_limit_reads_whole_thread():
     client = MagicMock()
     client.get_json.side_effect = _get_json
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"])
+        out = fetch_replies(client, 100, ["555"], pages=10)
     t = out[0]
     assert seen_pn == [1, 2, 3]
-    assert len(t.page.items) == 45
+    assert len(t.page.items) == 45 and t.total == 45
     assert t.page.items[0].content == "r555-0" and t.page.items[-1].content == "r555-44"
     assert t.page.has_more is False
+
+
+def test_fetch_replies_full_last_page_ends_by_total():
+    """末页恰好满 20 条时，靠 total 判定到底，不多发一次空请求。"""
+    client = MagicMock()
+    client.get_json.side_effect = _make_sized_sub_page({555: 40})
+    with _nav_patch("_comments"):
+        out = fetch_replies(client, 100, ["555"], pages=2)
+    assert len(out[0].page.items) == 40 and out[0].page.has_more is False
+
+
+def test_fetch_replies_page_beyond_end_is_empty():
+    client = MagicMock()
+    client.get_json.side_effect = _make_sized_sub_page({555: 30})
+    with _nav_patch("_comments"):
+        out = fetch_replies(client, 100, ["555"], start_page=5, pages=1)
+    assert out[0].page.items == [] and out[0].page.has_more is False and out[0].total == 30
 
 
 def _make_sized_sub_page(sizes: dict[int, int]):
@@ -307,21 +312,21 @@ def _make_sized_sub_page(sizes: dict[int, int]):
             for i in range(ps)
             if start + i < sizes[root]
         ]
-        return {"replies": page}
+        return {"replies": page, "page": {"count": sizes[root]}}
 
     return _get
 
 
-def test_fetch_replies_limit_applies_per_thread():
-    """limit 对每条主评论各自生效：没取完的标 has_more，一次到底的不标。"""
+def test_fetch_replies_pages_apply_per_thread():
+    """页范围对每条主评论各自生效：没取完的标 has_more，取到底的不标。"""
     client = MagicMock()
-    client.get_json.side_effect = _make_sized_sub_page({1: 8, 2: 12, 3: 3})
+    client.get_json.side_effect = _make_sized_sub_page({1: 50, 2: 30, 3: 3})
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
+        out = fetch_replies(client, 100, ["1", "2", "3"], pages=2)
     by_id = {t.comment_id: t for t in out}
-    assert [len(by_id[c].page.items) for c in ("1", "2", "3")] == [5, 5, 3]
-    assert by_id["1"].page.has_more and by_id["2"].page.has_more
-    assert by_id["3"].page.has_more is False
+    assert [len(by_id[c].page.items) for c in ("1", "2", "3")] == [40, 30, 3]
+    assert by_id["1"].page.has_more
+    assert not by_id["2"].page.has_more and not by_id["3"].page.has_more
 
 
 def test_fetch_replies_reports_withheld_count():
@@ -336,7 +341,7 @@ def test_fetch_replies_reports_withheld_count():
         "page": {"num": 1, "size": 20, "count": 10},
     }
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], limit=5)
+        out = fetch_replies(client, 100, ["555"], pages=1)
     assert out[0].withheld == 1
 
 
@@ -354,7 +359,7 @@ def test_fetch_replies_withheld_degrades_to_zero(shape: dict):
     client = MagicMock()
     client.get_json.return_value = {"replies": [_reply(1, "r")], **shape}
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], limit=5)
+        out = fetch_replies(client, 100, ["555"], pages=1)
     assert out[0].withheld == 0
 
 
@@ -362,7 +367,7 @@ def test_fetch_replies_requires_login():
     client = MagicMock()
     with _nav_patch("_comments", _ANONYMOUS):
         with pytest.raises(AuthRequiredError):
-            fetch_replies(client, 100, ["1"], limit=5)
+            fetch_replies(client, 100, ["1"], pages=1)
     client.get_json.assert_not_called()
 
 
@@ -380,7 +385,7 @@ def test_fetch_replies_rejects_non_numeric_ids():
     client = MagicMock()
     with _nav_patch("_comments"):
         with pytest.raises(BilibiliError, match="comment_ids 需为数字 id，收到 abc"):
-            fetch_replies(client, 100, ["1", "abc"])
+            fetch_replies(client, 100, ["1", "abc"], pages=1)
     client.get_json.assert_not_called()
 
 
@@ -389,7 +394,7 @@ def test_fetch_replies_rejects_comment_of_another_video():
     client = MagicMock()
     client.get_json.return_value = {"replies": [_reply(1, "r")], "root": {"oid": 999}}
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"])
+        out = fetch_replies(client, 100, ["555"], pages=1)
     assert out[0].page.items == []
     assert out[0].error is not None and "不属于这个视频" in out[0].error
 
@@ -403,7 +408,7 @@ def test_fetch_replies_isolates_failing_thread():
     client = MagicMock()
     client.get_json.side_effect = _get
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555", "1"])
+        out = fetch_replies(client, 100, ["555", "1"], pages=1)
     assert [t.comment_id for t in out] == ["555", "1"]
     assert [c.content for c in out[0].page.items] == ["ok"] and out[0].error is None
     assert out[1].page.items == [] and out[1].error is not None and "12006" in out[1].error
@@ -414,7 +419,7 @@ def test_fetch_replies_rate_limited_before_any_thread_raises():
     client.get_json.side_effect = _RateLimited("-352", "/x")
     with _nav_patch("_comments"):
         with pytest.raises(RateLimitedError, match="-352"):
-            fetch_replies(client, 100, ["1", "2"], limit=5)
+            fetch_replies(client, 100, ["1", "2"], pages=1)
 
 
 def test_fetch_replies_interrupted_keeps_finished_threads():
@@ -425,7 +430,7 @@ def test_fetch_replies_interrupted_keeps_finished_threads():
         _RateLimited("429", "/x"),
     ]
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["1", "2", "3"], limit=5)
+        out = fetch_replies(client, 100, ["1", "2", "3"], pages=1)
     assert [t.comment_id for t in out] == ["1", "2", "3"]
     assert [c.content for c in out[0].page.items] == ["a"] and out[0].error is None
     assert out[1].error == out[2].error == "二级评论抓取被平台限流（429），可以重试。"
@@ -1193,10 +1198,10 @@ def test_replies_replayed_from_cache():
     platform = _Platform()
     client = _cached_client(platform)
     with _nav_patch("_comments"):
-        first = fetch_replies(client, 100, ["555"], limit=50)
-        again = fetch_replies(client, 100, ["555"], limit=30)
+        first = fetch_replies(client, 100, ["555"], pages=3)
+        again = fetch_replies(client, 100, ["555"], start_page=2, pages=2)
     assert platform.calls == [("sub", 555, 1), ("sub", 555, 2), ("sub", 555, 3)]
-    assert again[0].page.items == first[0].page.items[:30]
+    assert again[0].page.items == first[0].page.items[20:]
     assert first[0].page.cached_at is None and again[0].page.cached_at is not None
 
 
@@ -1204,8 +1209,8 @@ def test_reply_of_another_video_not_cached():
     client = MagicMock()
     client.get_json.return_value = {"root": {"oid": 999}, "replies": [_reply(1, "x")]}
     with _nav_patch("_comments"):
-        fetch_replies(client, 100, ["555"])
-        out = fetch_replies(client, 100, ["555"])
+        fetch_replies(client, 100, ["555"], pages=1)
+        out = fetch_replies(client, 100, ["555"], pages=1)
     assert client.get_json.call_count == 2 and out[0].error
 
 

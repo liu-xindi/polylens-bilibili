@@ -162,6 +162,7 @@ class ReplyThread:
     comment_id: str
     page: Page[Comment]
     withheld: int = 0  # 平台声称有、却不肯列出的二级评论条数（见 _comments._withheld_count）
+    total: int | None = None  # 平台能列出的二级评论总数，用来算页数
     error: str | None = None  # 这条主评论取不到时的原因，此时 page 为空
 
 

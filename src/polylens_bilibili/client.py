@@ -185,12 +185,15 @@ class BilibiliClient:
         video_id: str,
         *,
         comment_ids: list[str],
-        limit: int | None = None,
+        start_page: int = 1,
+        pages: int,
     ) -> list[ReplyThread]:
         if not comment_ids:
             return []
         _info, aid, _cid = build_video_info(self._view(video_id))
-        return fetch_replies(self._http, aid, [str(c) for c in comment_ids], limit=limit)
+        return fetch_replies(
+            self._http, aid, [str(c) for c in comment_ids], start_page=start_page, pages=pages
+        )
 
     def get_danmaku(
         self, video_id: str, *, count: int, page: int = 1

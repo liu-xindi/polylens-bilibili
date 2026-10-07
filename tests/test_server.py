@@ -186,7 +186,7 @@ def test_get_comment_replies_groups_by_thread() -> None:
     ]
     with _with_client(get_comment_replies=threads):
         payload = _payload(
-            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "limit": 5}
+            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
     results = payload["results"]
     assert [r["comment_id"] for r in results] == ["1", "2"]
@@ -203,21 +203,24 @@ def test_get_comment_replies_surfaces_thread_error() -> None:
         ReplyThread("2", Page(items=[]), error="接口返回失败: 12006 没有该评论"),
     ]
     with _with_client(get_comment_replies=threads):
-        payload = _payload("get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"]})
+        payload = _payload(
+            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
+        )
     assert [r["error"] for r in payload["results"]] == [None, "接口返回失败: 12006 没有该评论"]
 
 
 def test_get_comment_replies_surfaces_withheld() -> None:
     """平台扣下的回复条数按主评论逐条给出，让调用方知道引用链可能断在哪。"""
     threads = [
-        ReplyThread("1", Page(items=[_comment("11", "x")], has_more=False), withheld=6),
+        ReplyThread("1", Page(items=[_comment("11", "x")], has_more=False), withheld=6, total=34),
         ReplyThread("2", Page(items=[], has_more=False)),
     ]
     with _with_client(get_comment_replies=threads):
         payload = _payload(
-            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "limit": 5}
+            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
     assert [r["withheld"] for r in payload["results"]] == [6, 0]
+    assert [r["total"] for r in payload["results"]] == [34, None]
 
 
 def test_get_danmaku_returns_toon() -> None:
@@ -426,7 +429,7 @@ def test_get_comment_replies_jq_runs_per_thread() -> None:
     with _with_client(get_comment_replies=threads):
         payload = _payload(
             "get_comment_replies",
-            {"url": BV_URL, "comment_ids": ["1", "2"], "jq": "[.[] | .content]"},
+            {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1, "jq": "[.[] | .content]"},
         )
     assert [r["replies"] for r in payload["results"]] == ['["x","y"]', '["z"]']
     assert [r["jq_count"] for r in payload["results"]] == [2, 1]

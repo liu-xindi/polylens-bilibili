@@ -94,6 +94,11 @@ def _normalize_reply(
     )
 
 
+def _listable_count(data: dict[str, Any]) -> int | None:
+    count = (data.get("page") or {}).get("count")
+    return count if isinstance(count, int) else None
+
+
 def _withheld_count(data: dict[str, Any]) -> int:
     """平台声称的回复数减去它肯列出的条数。
 
@@ -101,8 +106,8 @@ def _withheld_count(data: dict[str, Any]) -> int:
     而它们仍会作为 parent_id 被其他回复引用。差额是发现引用断链的唯一线索。
     """
     declared = (data.get("root") or {}).get("count")
-    listable = (data.get("page") or {}).get("count")
-    if not isinstance(declared, int) or not isinstance(listable, int):
+    listable = _listable_count(data)
+    if not isinstance(declared, int) or listable is None:
         return 0
     return max(0, declared - listable)
 
@@ -110,6 +115,7 @@ def _withheld_count(data: dict[str, Any]) -> int:
 class _ThreadPage(NamedTuple):
     replies: list[Comment]
     withheld: int
+    total: int | None  # 平台能列出的回复总数
 
 
 class _MainPage(NamedTuple):
@@ -149,34 +155,37 @@ def _fetch_thread_page(client: HttpClient, aid: int, root_id: int, pn: int) -> _
         _normalize_reply(raw, root_id=root_id, upper_mid=upper_mid)
         for raw in data.get("replies") or []
     ]
-    return _ThreadPage(replies, _withheld_count(data))
+    return _ThreadPage(replies, _withheld_count(data), _listable_count(data))
 
 
 def _fetch_thread(
-    client: HttpClient, aid: int, root_id: int, limit: int | None
-) -> tuple[Page[Comment], int]:
-    """从头取某主评论二级评论的前 limit 条；limit 为 None 时一直翻到最后一页。"""
-    pn = 1
+    client: HttpClient, aid: int, comment_id: str, start: int, pages: int
+) -> ReplyThread:
+    """取某主评论二级评论从第 start 页起的 pages 页，遇到不满的页即停。"""
+    root_id = int(comment_id)
     collected: list[Comment] = []
     reached_end = False
-    withheld = 0
     fetched_at: int | None = None
-    while limit is None or len(collected) < limit:
+    pn = start
+    for pn in range(start, start + pages):
         page, hit_at = _replayable(
             ("sub", client.account, aid, root_id, pn),
             partial(_fetch_thread_page, client, aid, root_id, pn),
         )
         fetched_at = _oldest(fetched_at, hit_at)
-        withheld = page.withheld
         collected.extend(page.replies)
         if len(page.replies) < REPLY_PAGE_SIZE:
             reached_end = True
             break
-        pn += 1
-    window = collected if limit is None else collected[:limit]
-    has_more = len(window) < len(collected) or not reached_end
-    page = Page(items=window, has_more=has_more, cached_at=to_local_time(fetched_at))
-    return page, withheld
+    # 末页恰好满 20 条时只有 total 能说明已到底
+    if page.total is not None and pn * REPLY_PAGE_SIZE >= page.total:
+        reached_end = True
+    return ReplyThread(
+        comment_id=comment_id,
+        page=Page(items=collected, has_more=not reached_end, cached_at=to_local_time(fetched_at)),
+        withheld=page.withheld,
+        total=page.total,
+    )
 
 
 def fetch_replies(
@@ -184,9 +193,10 @@ def fetch_replies(
     aid: int,
     comment_ids: list[str],
     *,
-    limit: int | None = None,
+    start_page: int = 1,
+    pages: int,
 ) -> list[ReplyThread]:
-    """按 comment_id 钻取二级评论。limit 是每条主评论只取前多少条；不传则全部取完。
+    """按 comment_id 钻取二级评论。每条主评论都取从第 start_page 页起的 pages 页，每页 20 条。
 
     内部串行，请求间隔由 HTTP 层统一控制。
     单条主评论取不到（评论不存在、不属于这个视频）只记在它的 error 上，不影响其他。
@@ -194,8 +204,10 @@ def fetch_replies(
     按页码取，结果可重放，留下已取完的没有副作用。一条都没取完才抛 RateLimitedError。
     二级评论接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
     """
-    if limit is not None and limit < 1:
-        raise BilibiliError(f"limit 需为正整数，收到 {limit}")
+    if start_page < 1:
+        raise BilibiliError(f"start_page 需为正整数，收到 {start_page}")
+    if pages < 1:
+        raise BilibiliError(f"pages 需为正整数，收到 {pages}")
     bad = [cid for cid in comment_ids if not cid.isdigit()]
     if bad:
         raise BilibiliError(f"comment_ids 需为数字 id，收到 {'、'.join(bad)}")
@@ -204,8 +216,7 @@ def fetch_replies(
     results: list[ReplyThread] = []
     for i, cid in enumerate(comment_ids):
         try:
-            page, withheld = _fetch_thread(client, aid, int(cid), limit)
-            results.append(ReplyThread(comment_id=cid, page=page, withheld=withheld))
+            results.append(_fetch_thread(client, aid, cid, start_page, pages))
         except BilibiliError as e:
             results.append(ReplyThread(comment_id=cid, page=Page(items=[]), error=str(e)))
         except _RateLimited as e:
