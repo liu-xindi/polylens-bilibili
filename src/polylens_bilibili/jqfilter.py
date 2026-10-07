@@ -122,14 +122,12 @@ def encode_items(
     name: str,
     items: list[Any],
     item_type: type,
-    expr: str | None,
+    expr: str,
     exclude: frozenset[str] = frozenset(),
 ) -> tuple[str, int | None]:
-    """把数据类实例列表编码为 TOON 表格；给了 expr 时先过 jq。返回 (编码串, jq_count)。"""
+    """把数据类实例列表过一遍 jq，按结果形状编码。返回 (编码串, jq_count)。"""
     columns = [f.name for f in fields(item_type) if f.name not in exclude]
     rows = [{c: d[c] for c in columns} for d in map(asdict, items)]
-    if expr is None:
-        return toon_table(name, rows, columns), None
     try:
         outputs = run_jq(expr, rows)
     except JqError as e:

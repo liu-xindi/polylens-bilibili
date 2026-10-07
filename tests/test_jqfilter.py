@@ -14,10 +14,10 @@ ENTRIES = [
 ]
 
 
-def test_without_expr_is_plain_toon() -> None:
-    text, jq_count = encode_items("subtitles", ENTRIES, SubtitleEntry, None)
+def test_identity_is_plain_toon() -> None:
+    text, jq_count = encode_items("subtitles", ENTRIES, SubtitleEntry, ".")
     assert text == "subtitles[2]{start,end,content}:\n  1,2,第一句\n  700,701.5,第二句"
-    assert jq_count is None
+    assert jq_count == 2
 
 
 def test_uniform_objects_become_table() -> None:
