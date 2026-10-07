@@ -34,7 +34,6 @@ from .models import (
     UpVideoItem,
     VideoInfo,
     VideoPart,
-    to_toon,
 )
 
 # ── 参数说明 ────────────────────────────────────────────────────────────────
@@ -120,6 +119,7 @@ class DanmakuResult(_Timed):
     video_id: str
     count: int
     danmaku: str
+    jq_count: int | None = None
 
 
 class SubtitlesResult(_Timed):
@@ -415,20 +415,28 @@ def create_server(
             Field(
                 description=(
                     "取多少条弹幕。取该段里 heat 最高的这么多条，结果仍按时间轴排序；"
-                    "达到或超过该段弹幕总数即返回全部。"
+                    "达到或超过平台给出的条数即全部返回。"
                     "heat 是平台给每条弹幕的标记，约 1-10 的档位，同档内不再细分。"
                 )
             ),
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
+        jq: Annotated[
+            str | None,
+            Field(description=_jq_desc(Danmaku, paged=False, scope="按 count 选出的弹幕")),
+        ] = None,
     ) -> DanmakuResult:
-        """(danmaku, bullet comments)"""
+        """timestamp 是弹幕在视频中的秒数。
+
+        平台可能只给出部分弹幕，少于视频信息里的弹幕数。
+
+        (danmaku, bullet comments)
+        """
         video_id, part = _resolve(url, page)
         bullets = _client().get_danmaku(video_id, count=count, page=part)
+        danmaku, jq_count = encode_items("danmaku", bullets, Danmaku, jq)
         return DanmakuResult(
-            video_id=video_id,
-            count=len(bullets),
-            danmaku=to_toon("danmaku", bullets, Danmaku),
+            video_id=video_id, count=len(bullets), danmaku=danmaku, jq_count=jq_count
         )
 
     @mcp.tool(annotations=_READS_PLATFORM)
@@ -605,8 +613,6 @@ def create_server(
         ],
     ) -> UpInfoResult:
         """含昵称、签名、等级、粉丝数、关注数、总获赞、认证、大会员等。
-
-        投稿数见 list_up_videos 的 total。
 
         (uploader profile, channel info, followers)
         """

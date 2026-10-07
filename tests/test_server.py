@@ -231,6 +231,19 @@ def test_get_danmaku_returns_toon() -> None:
     assert payload["danmaku"] == "danmaku[1]{content,timestamp,heat}:\n  弹,0,7"
 
 
+def test_get_danmaku_jq_runs_on_selected_bullets() -> None:
+    bullets = [Danmaku(content=c, timestamp=t, heat=5) for c, t in
+               [("来了", 1.0), ("来了", 2.0), ("好看", 30.0)]]
+    with _with_client(get_danmaku=bullets):
+        payload = _payload(
+            "get_danmaku",
+            {"url": BV_URL, "count": 3, "jq": "unique_by(.content) | map(.content)"},
+        )
+    assert payload["count"] == 3
+    assert payload["danmaku"] == '["好看","来了"]'
+    assert payload["jq_count"] == 2
+
+
 def test_get_subtitles_returns_toon_with_lang_info() -> None:
     track = SubtitleTrack([SubtitleEntry(start=1.0, end=2.0, content="一句")], "ai-zh",
                           ["en-US", "ai-zh"])
@@ -399,7 +412,7 @@ def test_list_tools_accept_jq() -> None:
     with_jq = {name for name, schema in schemas.items() if "jq" in schema["properties"]}
     assert with_jq == {
         "search_videos", "list_up_videos", "get_feed", "get_comments", "get_subtitles",
-        "get_comment_replies", "get_parts",
+        "get_comment_replies", "get_parts", "get_danmaku",
     }
     subtitles_desc = schemas["get_subtitles"]["properties"]["jq"]["description"]
     assert "start,end,content" in subtitles_desc
