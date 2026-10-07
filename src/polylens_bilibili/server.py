@@ -318,11 +318,11 @@ def create_server(
                     "排序方式：hot 是平台的综合排序。"
                     "hot 的 cursor 只标识浏览会话，进度记在平台侧，"
                     "同一 cursor 每次调用都返回下一批，不能重放某一批；"
-                    "对同一视频不传 cursor 重新开始 hot，此前 hot cursor 的进度会退回开头附近，"
-                    "之后返回的是已取过的内容。"
+                    "同一视频同一时间只用一个 hot cursor："
+                    "新开会话后，旧 cursor 只会返回已取过的内容，新旧混用时两者都会回退。"
                     "newest 按时间倒序，cursor 含位置，可重复取同一批，不受新会话影响。"
                     "需要完整抓取或断点续取时用 newest。"
-                    "newest 的结果缓存 10 分钟，cached_at 是缓存的抓取时间。"
+                    "newest 的结果缓存 30 分钟，cached_at 是缓存的抓取时间。"
                 )
             ),
         ] = "hot",
@@ -384,7 +384,7 @@ def create_server(
         中途被风控或限流时，已取完的照常返回，其余的 error 里说明原因。
         parent_id 为空表示直接回复主评论，否则是所回复的那条二级评论的 id。
         parent_id 指向的二级评论不在列表里时，那条被平台隐藏了，取不到。
-        结果缓存 10 分钟，cached_at 是缓存的抓取时间。
+        结果缓存 30 分钟，cached_at 是缓存的抓取时间。
         image_urls、link_titles 是字符串，多个时以换行分隔。
 
         (comment replies, sub-replies, thread)

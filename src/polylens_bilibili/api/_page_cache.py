@@ -15,7 +15,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable
 from typing import Any, NamedTuple
 
-_TTL = 600.0
+_TTL = 1800.0
 _MAX_PAGES = 1000
 
 
