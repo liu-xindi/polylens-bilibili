@@ -1,4 +1,4 @@
-# polylens-bilibili
+# polylens-bilibili-mcp
 
 读取 B 站视频、评论、弹幕、字幕等公开信息的 MCP 服务，支持用 jq 在返回前筛选和裁剪结果。只读，不向平台写入任何数据。
 
@@ -63,9 +63,9 @@ claude mcp add polylens-bilibili -- uvx polylens-bilibili-mcp
 ### 从源码运行
 
 ```bash
-git clone https://github.com/liu-xindi/polylens-bilibili.git
-cd polylens-bilibili && uv sync
-claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bilibili polylens-bilibili-mcp
+git clone https://github.com/liu-xindi/polylens-bilibili-mcp.git
+cd polylens-bilibili-mcp && uv sync
+claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bilibili-mcp polylens-bilibili-mcp
 ```
 
 升级：`git pull && uv sync`。
@@ -106,4 +106,4 @@ uvx polylens-bilibili-mcp
 
 本工具供个人学习与研究使用。需要登录的功能以使用者本人的凭据，在其账号权限范围内访问，不绕过付费墙或内容保护。所获内容版权归原发布方，使用者须自行遵守法律、平台条款与版权规定，并承担使用后果。
 
-以 [Apache License 2.0](https://github.com/liu-xindi/polylens-bilibili/blob/main/LICENSE) 授权，按现状提供，不附任何担保。
+以 [Apache License 2.0](https://github.com/liu-xindi/polylens-bilibili-mcp/blob/main/LICENSE) 授权，按现状提供，不附任何担保。

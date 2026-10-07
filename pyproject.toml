@@ -28,10 +28,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/liu-xindi/polylens-bilibili"
-Repository = "https://github.com/liu-xindi/polylens-bilibili"
-Issues = "https://github.com/liu-xindi/polylens-bilibili/issues"
-Changelog = "https://github.com/liu-xindi/polylens-bilibili/releases"
+Homepage = "https://github.com/liu-xindi/polylens-bilibili-mcp"
+Repository = "https://github.com/liu-xindi/polylens-bilibili-mcp"
+Issues = "https://github.com/liu-xindi/polylens-bilibili-mcp/issues"
+Changelog = "https://github.com/liu-xindi/polylens-bilibili-mcp/releases"
 
 [project.scripts]
 polylens-bilibili-mcp = "polylens_bilibili.__main__:main"
