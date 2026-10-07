@@ -1,6 +1,6 @@
 [project]
 name = "polylens-bilibili"
-version = "0.1.0"
+version = "0.2.0"
 description = "从 B 站视频中提取信息的 MCP server"
 readme = "README.md"
 license = "Apache-2.0"
