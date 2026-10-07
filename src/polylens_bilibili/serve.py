@@ -42,7 +42,7 @@ def resolve_config(
 ) -> ServeConfig:
     """按 命令行 > 环境变量 > 默认 解析出运行配置。"""
     env = os.environ if env is None else env
-    parser = argparse.ArgumentParser(prog="polylens-bilibili")
+    parser = argparse.ArgumentParser(prog="polylens-bilibili-mcp")
     parser.add_argument("--transport", choices=["stdio", "http"])
     parser.add_argument("--host")
     parser.add_argument("--port", type=int)

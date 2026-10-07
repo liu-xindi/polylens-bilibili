@@ -1,4 +1,4 @@
-"""polylens-bilibili: 从 B 站视频中提取信息的 MCP server。"""
+"""polylens-bilibili-mcp: 读取 B 站视频、评论、弹幕、字幕等公开信息的 MCP 服务。"""
 
 from __future__ import annotations
 
