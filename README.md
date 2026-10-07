@@ -37,17 +37,12 @@
 
 ## 安装
 
-需要 [uv](https://docs.astral.sh/uv/)（会自动准备 Python 3.13+）和 git；`get_frame` 另需 ffmpeg。
-
-```bash
-git clone https://github.com/liu-xindi/polylens-bilibili.git
-cd polylens-bilibili && uv sync
-```
+需要 [uv](https://docs.astral.sh/uv/)，没有 Python 3.13+ 时 uv 会自动下载；`get_frame` 另需 ffmpeg。
 
 接入 Claude Code：
 
 ```bash
-claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bilibili polylens-bilibili
+claude mcp add polylens-bilibili -- uvx polylens-bilibili
 ```
 
 接入 Claude Desktop，在 `claude_desktop_config.json` 中加入：
@@ -56,11 +51,21 @@ claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bi
 {
   "mcpServers": {
     "polylens-bilibili": {
-      "command": "uv",
-      "args": ["run", "--directory", "/绝对路径/polylens-bilibili", "polylens-bilibili"]
+      "command": "uvx",
+      "args": ["polylens-bilibili"]
     }
   }
 }
+```
+
+升级：重启客户端，`uvx` 启动时会取最新版本。
+
+### 从源码运行
+
+```bash
+git clone https://github.com/liu-xindi/polylens-bilibili.git
+cd polylens-bilibili && uv sync
+claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bilibili polylens-bilibili
 ```
 
 升级：`git pull && uv sync`。
@@ -73,7 +78,7 @@ claude mcp add polylens-bilibili -- uv run --directory /绝对路径/polylens-bi
 POLYLENS_BILIBILI_TRANSPORT=http \
 POLYLENS_BILIBILI_PUBLIC_URL=https://example.com \
 POLYLENS_BILIBILI_AUTH_SECRET='<口令>' \
-uv run polylens-bilibili
+uvx polylens-bilibili
 ```
 
 然后在 claude.ai 添加连接器，URL 填 `https://example.com/mcp`，首次授权时在同意页输入上面的口令。
@@ -101,4 +106,4 @@ uv run polylens-bilibili
 
 本工具供个人学习与研究使用。需要登录的功能以使用者本人的凭据，在其账号权限范围内访问，不绕过付费墙或内容保护。所获内容版权归原发布方，使用者须自行遵守法律、平台条款与版权规定，并承担使用后果。
 
-以 [Apache License 2.0](LICENSE) 授权，按现状提供，不附任何担保。
+以 [Apache License 2.0](https://github.com/liu-xindi/polylens-bilibili/blob/main/LICENSE) 授权，按现状提供，不附任何担保。
