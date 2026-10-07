@@ -7,7 +7,10 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "liu-xindi" }]
 requires-python = ">=3.13"
-keywords = ["bilibili", "mcp", "mcp-server", "model-context-protocol", "claude", "jq", "danmaku", "subtitles"]
+keywords = [
+    "bilibili", "mcp", "mcp-server", "model-context-protocol", "claude", "jq", "danmaku", "subtitles",
+    "remote-mcp", "streamable-http", "oauth", "claude-ai",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
