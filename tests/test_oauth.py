@@ -36,22 +36,24 @@ def _client() -> OAuthClientInformationFull:
     )
 
 
-def _params() -> AuthorizationParams:
+def _params(resource: str | None = "https://mcp.example.com/mcp") -> AuthorizationParams:
     return AuthorizationParams(
         state="state-xyz",
         scopes=[],
         code_challenge="challenge-abc",
         redirect_uri=AnyUrl(_REDIRECT),
         redirect_uri_provided_explicitly=True,
-        resource="https://mcp.example.com/mcp",
+        resource=resource,
     )
 
 
-async def _full_grant(p: oauth.OAuthProvider) -> tuple[str, OAuthClientInformationFull]:
+async def _full_grant(
+    p: oauth.OAuthProvider, params: AuthorizationParams | None = None
+) -> tuple[str, OAuthClientInformationFull]:
     """注册客户端 → authorize → grant_pending，返回 (授权码, client)。"""
     client = _client()
     await p.register_client(client)
-    url = await p.authorize(client, _params())
+    url = await p.authorize(client, params or _params())
     req_id = parse_qs(urlparse(url).query)["req"][0]
     redirect = p.grant_pending(req_id)
     assert redirect is not None
@@ -113,6 +115,21 @@ def test_code_exchange_yields_working_access_token(tmp_path) -> None:
 
     token = _run(scenario())
     assert token.refresh_token
+
+
+def test_code_without_resource_is_issued_for_this_server(tmp_path) -> None:
+    """9-23 有客户端授权时没带 resource；开了 validate_token_resource 后这类令牌会被拒。"""
+    p = _provider(tmp_path)
+
+    async def scenario():
+        code, client = await _full_grant(p, _params(resource=None))
+        auth_code = await p.load_authorization_code(client, code)
+        assert auth_code is not None
+        token = await p.exchange_authorization_code(client, auth_code)
+        return await p.load_access_token(token.access_token)
+
+    at = _run(scenario())
+    assert at is not None and at.resource == "https://mcp.example.com/mcp"
 
 
 def test_tokens_stored_hashed_not_plaintext(tmp_path) -> None:
@@ -195,6 +212,7 @@ def test_create_server_enables_oauth_with_url_and_secret() -> None:
     )
     assert mcp.settings.auth is not None
     assert str(mcp.settings.auth.issuer_url).rstrip("/") == "https://mcp.example.com"
+    assert mcp.settings.auth.validate_token_resource is True
 
 
 def test_create_server_no_oauth_without_secret() -> None:

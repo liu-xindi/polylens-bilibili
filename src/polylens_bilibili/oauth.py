@@ -161,7 +161,8 @@ class OAuthProvider(
             code_challenge=p.code_challenge,
             redirect_uri=p.redirect_uri,
             redirect_uri_provided_explicitly=p.redirect_uri_provided_explicitly,
-            resource=p.resource,
+            # 客户端没带 resource 时按本服务签发，开着 validate_token_resource 也不会被拒。
+            resource=p.resource or self._resource,
         )
         return construct_redirect_uri(
             str(p.redirect_uri), code=code, state=p.state, iss=self._issuer
@@ -252,6 +253,7 @@ def build_oauth(public_url: str) -> tuple[dict[str, Any], OAuthProvider]:
         "auth": AuthSettings(
             issuer_url=AnyHttpUrl(base),
             resource_server_url=AnyHttpUrl(f"{base}/mcp"),
+            validate_token_resource=True,
             client_registration_options=ClientRegistrationOptions(enabled=True),  # DCR 开
             revocation_options=RevocationOptions(enabled=True),
         ),
