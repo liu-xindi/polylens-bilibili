@@ -274,7 +274,14 @@ def create_server(
         auth_kwargs, oauth_provider = build_oauth(public_url)
         net.update(auth_kwargs)
 
-    mcp = FastMCP("polylens-bilibili", instructions=_SERVER_INSTRUCTIONS, **net)
+    # mcp 1.30 起默认回收空闲 30 分钟的会话。claude.ai 隔久了仍拿旧会话 ID 来请求，
+    # 先吃 404 再重连，用户看到的是第一次调用落空。关掉回收，与 1.29 及以前一致。
+    mcp = FastMCP(
+        "polylens-bilibili",
+        instructions=_SERVER_INSTRUCTIONS,
+        session_idle_timeout=None,
+        **net,
+    )
 
     if oauth_provider is not None and auth_secret:
         from .oauth import register_consent_route

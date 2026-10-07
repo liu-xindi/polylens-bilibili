@@ -111,6 +111,17 @@ def test_create_server_applies_host_port() -> None:
     assert mcp.settings.port == 9999
 
 
+def test_http_sessions_are_not_reaped_when_idle() -> None:
+    """mcp 1.30 起默认回收空闲 30 分钟的会话。
+
+    claude.ai 隔久了仍拿旧会话 ID 来请求，先吃 404 再重连。polylens-goofish 的服务日志里
+    15 次 404 都在这种时候，同期用 1.29（不回收）的本项目没有这个现象。
+    """
+    mcp = create_server()
+    mcp.streamable_http_app()
+    assert mcp.session_manager.session_idle_timeout is None
+
+
 def _no_run(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """把 create_server 换成只记录传输方式的替身。"""
     ran: list[str] = []

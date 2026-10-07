@@ -22,7 +22,8 @@ classifiers = [
 dependencies = [
     "jq>=1.12",
     # mcp 2.x 重命名了 FastMCP 并改动了服务端 API，升级需要改 server.py 与 oauth.py。
-    "mcp[cli]>=1.27,<2",
+    # 1.30 起 FastMCP 才接受 session_idle_timeout，见 server.py。
+    "mcp[cli]>=1.30,<2",
     "segno>=1.6",
 ]
 
