@@ -151,7 +151,7 @@ def _comment(cid: str, content: str, **kw: Any) -> Comment:
 def test_get_comments_returns_toon_and_paging() -> None:
     page = Page(items=[_comment("1", "a"), _comment("2", "b")], has_more=True, next_cursor="tok")
     with _with_client(get_comments=page):
-        payload = _payload("get_comments", {"url": BV_URL, "count": 2})
+        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 2})
     assert payload["video_id"] == "BV1xx411c7mD"
     assert payload["count"] == 2
     assert payload["has_more"] is True
@@ -165,14 +165,14 @@ def test_get_comments_returns_toon_and_paging() -> None:
 def test_get_comments_rate_limited_partial_carries_message() -> None:
     page = Page(items=[], has_more=True, next_cursor="SESSION", rate_limited="只取到部分")
     with _with_client(get_comments=page):
-        payload = _payload("get_comments", {"url": BV_URL, "count": 40})
+        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 40})
     assert payload["next_cursor"] == "SESSION"
     assert payload["message"] == "只取到部分"
 
 
 def test_get_comments_omits_next_cursor_at_end() -> None:
     with _with_client(get_comments=Page(items=[], has_more=False)):
-        payload = _payload("get_comments", {"url": BV_URL, "count": 5})
+        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 5})
     assert payload["has_more"] is False
     assert payload["next_cursor"] is None
     assert payload["message"] is None
@@ -186,7 +186,7 @@ def test_get_comment_replies_groups_by_thread() -> None:
     ]
     with _with_client(get_comment_replies=threads):
         payload = _payload(
-            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
+            "get_comment_replies", {"jq": ".", "url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
     results = payload["results"]
     assert [r["comment_id"] for r in results] == ["1", "2"]
@@ -204,7 +204,7 @@ def test_get_comment_replies_surfaces_thread_error() -> None:
     ]
     with _with_client(get_comment_replies=threads):
         payload = _payload(
-            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
+            "get_comment_replies", {"jq": ".", "url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
     assert [r["error"] for r in payload["results"]] == [None, "接口返回失败: 12006 没有该评论"]
 
@@ -217,7 +217,7 @@ def test_get_comment_replies_surfaces_withheld() -> None:
     ]
     with _with_client(get_comment_replies=threads):
         payload = _payload(
-            "get_comment_replies", {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
+            "get_comment_replies", {"jq": ".", "url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
     assert [r["withheld"] for r in payload["results"]] == [6, 0]
     assert [r["total"] for r in payload["results"]] == [34, None]
@@ -226,7 +226,7 @@ def test_get_comment_replies_surfaces_withheld() -> None:
 def test_get_danmaku_returns_toon() -> None:
     bullets = [Danmaku(content="弹", timestamp=0.0, heat=7)]
     with _with_client(get_danmaku=bullets):
-        payload = _payload("get_danmaku", {"url": BV_URL, "count": 1})
+        payload = _payload("get_danmaku", {"jq": ".", "url": BV_URL, "count": 1})
     assert payload["count"] == 1
     assert payload["danmaku"] == "danmaku[1]{content,timestamp,heat}:\n  弹,0,7"
 
@@ -248,7 +248,7 @@ def test_get_subtitles_returns_toon_with_lang_info() -> None:
     track = SubtitleTrack([SubtitleEntry(start=1.0, end=2.0, content="一句")], "ai-zh",
                           ["en-US", "ai-zh"])
     with _with_client(get_subtitles=track):
-        payload = _payload("get_subtitles", {"url": BV_URL})
+        payload = _payload("get_subtitles", {"jq": ".", "url": BV_URL})
     assert payload["count"] == 1
     assert payload["lang"] == "ai-zh"  # 默认取首条时也告知实际语种
     assert payload["available_langs"] == ["en-US", "ai-zh"]
@@ -263,7 +263,7 @@ def test_get_subtitles_passes_lang_through() -> None:
         return SubtitleTrack([], "en-US", ["en-US"])
 
     with _with_client(get_subtitles=_capture):
-        _payload("get_subtitles", {"url": BV_URL + "?p=3", "lang": "en-US"})
+        _payload("get_subtitles", {"jq": ".", "url": BV_URL + "?p=3", "lang": "en-US"})
     assert seen == {"video_id": "BV1xx411c7mD", "page": 3, "lang": "en-US"}
 
 
@@ -271,7 +271,7 @@ def test_get_parts_returns_toon() -> None:
     parts = [VideoPart(page=1, part="片头", duration=60.0),
              VideoPart(page=2, part="正片", duration=600.0)]
     with _with_client(get_parts=parts):
-        payload = _payload("get_parts", {"url": BV_URL})
+        payload = _payload("get_parts", {"jq": ".", "url": BV_URL})
     assert payload["count"] == 2
     assert payload["parts"] == (
         "parts[2]{page,part,duration}:\n  1,片头,60\n  2,正片,600"
@@ -290,7 +290,7 @@ def test_search_returns_toon_and_paging() -> None:
         next_cursor="1",
     )
     with _with_client(search=page):
-        payload = _payload("search_videos", {"query": "py"})
+        payload = _payload("search_videos", {"jq": ".", "query": "py"})
     assert payload["count"] == 1
     assert payload["has_more"] is True and payload["next_cursor"] == "1"
     assert payload["results"].startswith(
@@ -307,7 +307,7 @@ def test_search_passes_order_through() -> None:
         return Page(items=[])
 
     with _with_client(search=search):
-        _payload("search_videos", {"query": "py", "order": "most_danmaku"})
+        _payload("search_videos", {"jq": ".", "query": "py", "order": "most_danmaku"})
     assert seen["order"] == "most_danmaku"
 
 
@@ -460,10 +460,11 @@ def test_get_subtitles_jq_text_only() -> None:
     assert payload["jq_count"] is None
 
 
-def test_without_jq_jq_count_is_null() -> None:
+def test_jq_is_required() -> None:
     with _with_client(get_feed=[]):
-        payload = _payload("get_feed")
-    assert payload["jq_count"] is None
+        result = _call("get_feed")
+    assert result.isError
+    assert "jq" in result.content[0].text
 
 
 def test_bad_jq_is_tool_error_with_fields() -> None:
@@ -481,9 +482,12 @@ def test_bad_jq_is_tool_error_with_fields() -> None:
     ("tool", "args", "behaviour"),
     [
         ("get_video_info", {"url": BV_URL}, {"get_video_info": VideoInfo(id="B", title="t")}),
-        ("get_comments", {"url": BV_URL, "count": 1}, {"get_comments": Page(items=[])}),
-        ("get_subtitles", {"url": BV_URL}, {"get_subtitles": SubtitleTrack([], None, [])}),
-        ("search_videos", {"query": "x"}, {"search": Page(items=[])}),
+        ("get_comments", {"jq": ".", "url": BV_URL, "count": 1}, {"get_comments": Page(items=[])}),
+        (
+            "get_subtitles", {"jq": ".", "url": BV_URL},
+            {"get_subtitles": SubtitleTrack([], None, [])},
+        ),
+        ("search_videos", {"jq": ".", "query": "x"}, {"search": Page(items=[])}),
     ],
 )
 def test_content_tools_attach_elapsed_s(
@@ -526,7 +530,7 @@ def test_get_comments_passes_sort_through() -> None:
         return Page(items=[])
 
     with _with_client(get_comments=_capture):
-        _payload("get_comments", {"url": BV_URL, "count": 5, "mode": "newest"})
+        _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 5, "mode": "newest"})
     assert seen["sort"] == "newest"
 
 
@@ -567,6 +571,7 @@ def test_list_up_videos_resolves_link_and_returns_toon() -> None:
     with _with_client(get_up_videos=get_up_videos):
         payload = _payload("list_up_videos", {
             "author_url": "https://space.bilibili.com/42/upload/video", "order": "most_viewed",
+            "jq": ".",
         })
     assert seen["mid"] == 42 and seen["order"] == "most_viewed"
     assert payload["author"] == "老何"
@@ -609,7 +614,7 @@ def test_get_feed_returns_toon() -> None:
                  rcmd_reason=None),
     ]
     with _with_client(get_feed=items):
-        payload = _payload("get_feed")
+        payload = _payload("get_feed", {"jq": "."})
     assert payload["count"] == 2
     assert payload["feed"].startswith(
         "feed[2]{title,url,author,author_url,published_at,duration_sec,view_count,"
@@ -635,6 +640,6 @@ def test_get_feed_takes_no_url() -> None:
 
 def test_get_feed_empty_batch() -> None:
     with _with_client(get_feed=[]):
-        payload = _payload("get_feed")
+        payload = _payload("get_feed", {"jq": "."})
     assert payload["count"] == 0
     assert payload["feed"].startswith("feed[0]{")

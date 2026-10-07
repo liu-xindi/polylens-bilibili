@@ -27,7 +27,7 @@
 
 ## 用 jq 精简返回
 
-`search_videos`、`list_up_videos`、`get_feed`、`get_parts`、`get_comments`、`get_comment_replies`、`get_danmaku`、`get_subtitles` 接受可选的 `jq` 参数，在返回前筛选条目或裁剪字段，减少上下文占用。表达式由模型自行编写，例如：
+`search_videos`、`list_up_videos`、`get_feed`、`get_parts`、`get_comments`、`get_comment_replies`、`get_danmaku`、`get_subtitles` 必须传 `jq` 参数，在返回前筛选条目或裁剪字段，减少上下文占用。表达式由模型自行编写，传 `.` 则原样返回，例如：
 
 | 用途 | 表达式 |
 |---|---|

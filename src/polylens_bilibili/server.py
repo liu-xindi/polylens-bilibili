@@ -66,7 +66,7 @@ def _jq_desc(
     )
     paging = "分页字段不在输入里；只筛本批，筛完为空时仍以 has_more 判断有无下一批。"
     return (
-        f"可选的 jq 表达式。输入是{scope}组成的数组，每条字段：{columns}。"
+        f"必填的 jq 表达式。输入是{scope}组成的数组，每条字段：{columns}。"
         + (f"体积大、多数任务用不到的字段：{bulky}；特定任务需要时照常使用。" if bulky else "")
         + (paging if paged else "")
         + "结果为字符串时原样返回，其他结果编码为表格或 JSON；结果为数组时 jq_count 是其长度。"
@@ -336,14 +336,15 @@ def create_server(
                 )
             ),
         ] = "hot",
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(
                 description=_jq_desc(Comment, paged=True)
                 + "hot 下若还要续取，不要用 jq 截取条数（如 .[:N]）："
                 "续取从整批之后开始，截掉的评论取不回。"
             ),
-        ] = None,
+        ],
     ) -> CommentsResult:
         """不含二级评论，二级评论通过 get_comment_replies 获取。需要登录。
 
@@ -381,14 +382,15 @@ def create_server(
             int,
             Field(description="每条主评论从第几页开始，1 起。"),
         ] = 1,
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(
                 description=_jq_desc(
                     Comment, paged=False, scope="单条主评论下的二级评论", exclude=_REPLY_EXCLUDE
                 )
             ),
-        ] = None,
+        ],
     ) -> CommentRepliesResult:
         """二级评论按时间正序排列。需要登录。
 
@@ -441,10 +443,11 @@ def create_server(
             ),
         ],
         page: Annotated[int | None, Field(description=_PAGE_DESC)] = None,
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(description=_jq_desc(Danmaku, paged=False, scope="按 count 选出的弹幕")),
-        ] = None,
+        ],
     ) -> DanmakuResult:
         """timestamp 是弹幕在视频中的秒数。
 
@@ -473,10 +476,11 @@ def create_server(
                 )
             ),
         ] = None,
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(description=_jq_desc(SubtitleEntry, paged=False)),
-        ] = None,
+        ],
     ) -> SubtitlesResult:
         """逐句返回。需要登录。字幕可能为 AI 生成或机器翻译，存在误差。
 
@@ -498,10 +502,11 @@ def create_server(
     @_timed
     def get_parts(
         url: Annotated[str, Field(description=_URL_DESC)],
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(description=_jq_desc(VideoPart, paged=False)),
-        ] = None,
+        ],
     ) -> PartsResult:
         """即分 P。单段视频返回一项。(video parts, pages)"""
         video_id, _ = _resolve(url)
@@ -549,10 +554,11 @@ def create_server(
             Literal["relevance", "newest", "most_viewed", "most_danmaku", "most_favorited"],
             Field(description="排序。relevance 是 B 站的综合排序。"),
         ] = "relevance",
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(description=_jq_desc(SearchItem, paged=True)),
-        ] = None,
+        ],
     ) -> SearchResult:
         """每批最多 30 条，最多翻 30 批。
 
@@ -600,10 +606,11 @@ def create_server(
             str | None,
             Field(description="按关键词筛选投稿，平台除标题外也会匹配简介等。"),
         ] = None,
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(description=_jq_desc(UpVideoItem, paged=True)),
-        ] = None,
+        ],
     ) -> UpVideosResult:
         """每批最多 40 条。total 是视频总数，带 keyword 时为匹配数。需要登录。
 
@@ -642,10 +649,11 @@ def create_server(
     @mcp.tool(annotations=_READS_PLATFORM)
     @_timed
     def get_feed(
+        *,
         jq: Annotated[
-            str | None,
+            str,
             Field(description=_jq_desc(FeedItem, paged=False)),
-        ] = None,
+        ],
     ) -> FeedResult:
         """B 站首页推荐流，每批最多 30 条。
 
