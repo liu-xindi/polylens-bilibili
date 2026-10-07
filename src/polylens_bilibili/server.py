@@ -604,7 +604,9 @@ def create_server(
             str, Field(description="UP 主空间链接（其他工具返回的 author_url），或数字 mid。")
         ],
     ) -> UpInfoResult:
-        """含昵称、签名、等级、粉丝数、关注数、投稿数、总获赞、认证、大会员等。
+        """含昵称、签名、等级、粉丝数、关注数、总获赞、认证、大会员等。
+
+        投稿数见 list_up_videos 的 total。
 
         (uploader profile, channel info, followers)
         """

@@ -46,8 +46,6 @@ def _to_info(mid: int, data: dict[str, Any]) -> UpInfo:
         level=_int_or_none((card.get("level_info") or {}).get("current_level")),
         follower_count=_int_or_none(data.get("follower")),
         following_count=_int_or_none(card.get("attention")),
-        video_count=_int_or_none(data.get("archive_count")),
-        article_count=_int_or_none(data.get("article_count")),
         like_count=_int_or_none(data.get("like_num")),
         official_type=_OFFICIAL_TYPES.get(official.get("type")),  # type: ignore[arg-type]
         official_title=_text(official.get("title")),

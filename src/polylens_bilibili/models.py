@@ -296,8 +296,6 @@ class UpInfo(BaseModel):
     level: int | None = None
     follower_count: int | None = None
     following_count: int | None = None
-    video_count: int | None = None
-    article_count: int | None = None
     like_count: int | None = None
     official_type: str | None = None
     official_title: str | None = None

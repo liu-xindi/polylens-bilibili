@@ -22,8 +22,7 @@ def _card(**over: Any) -> dict[str, Any]:
         "vip": {"type": 2, "status": 1, "label": {"text": "年度大会员"}},
     }
     card.update(over)
-    return {"card": card, "follower": 100, "archive_count": 497, "article_count": 3,
-            "like_num": 198533}
+    return {"card": card, "follower": 100, "like_num": 198533}
 
 
 class _Client:
@@ -53,7 +52,7 @@ def test_maps_fields() -> None:
     assert info.model_dump() == {
         "mid": MID, "author": "老番茄", "author_url": f"https://space.bilibili.com/{MID}",
         "sign": "天天开心", "sex": "男", "level": 6, "follower_count": 100,
-        "following_count": 52, "video_count": 497, "article_count": 3, "like_count": 198533,
+        "following_count": 52, "like_count": 198533,
         "official_type": "个人认证", "official_title": "2025百大UP主", "vip": "年度大会员",
         "face_url": "https://i0.hdslb.com/face.jpg",
     }
