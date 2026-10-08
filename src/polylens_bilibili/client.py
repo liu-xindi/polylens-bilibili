@@ -185,13 +185,15 @@ class BilibiliClient:
         cursor: str | None = None,
         sort: str = "hot",
         batch_id: str | None = None,
+        session: str | None = None,
     ) -> Page[Comment]:
         if sort != "newest":
             _comments_open()
         _info, aid, _cid = build_video_info(self._view(video_id))
         with _comment_requests:
             return fetch_comments(
-                self._http, aid, count=count, cursor=cursor, sort=sort, batch_id=batch_id
+                self._http, aid, count=count, cursor=cursor, sort=sort,
+                batch_id=batch_id, session=session,
             )
 
     def get_comment_replies(

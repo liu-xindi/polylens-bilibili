@@ -285,6 +285,7 @@ def fetch_comments(
     cursor: str | None = None,
     sort: str = "hot",
     batch_id: str | None = None,
+    session: str | None = None,
 ) -> Page[Comment]:
     """抓取视频主评论（纯主评论，不含二级评论）。置顶评论插入列表最前面。
 
@@ -297,6 +298,8 @@ def fetch_comments(
     不同视频之间互不影响。
     时间序的游标带位置，可重放，不受新会话影响；因此时间序的页走缓存。
     热度序要重放只能靠调用方给的 batch_id：同一游标配同一 batch_id 时整批缓存，再取时原样返回。
+    batch_id 由模型自取，各对话常取同样的名字（如 a1），故按 MCP 会话隔离：
+    claude.ai 的连接器按对话给出会话 ID，同一对话续接也不变（10-08 实测）。
 
     中途触发风控时返回已取到的部分并标 rate_limited：热度序下这些页平台已记为取过，
     丢掉它们，调用方用同一游标重试也取不回来。一页都没取到才抛 RateLimitedError。
@@ -313,7 +316,7 @@ def fetch_comments(
         _check_cursor(cursor)
     key = None
     if sort == "hot" and batch_id:
-        key = ("hot", client.account, aid, cursor or "", batch_id)
+        key = ("hot", client.account, aid, session, cursor or "", batch_id)
     if key is not None and (hit := page_cache.get(key)) is not None:
         return replace(hit.value, cached_at=to_local_time(hit.fetched_at))
     page = _collect_main(client, aid, count=count, cursor=cursor, sort=sort)

@@ -597,13 +597,42 @@ def test_hot_comments_require_batch_id() -> None:
 def test_get_comments_passes_sort_through() -> None:
     seen: dict[str, object] = {}
 
-    def _capture(video_id, *, count, cursor=None, sort="hot", batch_id=None):
+    def _capture(video_id, *, count, cursor=None, sort="hot", batch_id=None, session=None):
         seen.update(video_id=video_id, count=count, sort=sort)
         return Page(items=[])
 
     with _with_client(get_comments=_capture):
         _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 5, "mode": "newest"})
     assert seen["sort"] == "newest"
+
+
+def test_get_comments_passes_batch_id_and_mcp_session() -> None:
+    seen: dict[str, object] = {}
+
+    def _capture(video_id, **kwargs):
+        seen.update(kwargs)
+        return Page(items=[])
+
+    with (
+        _with_client(get_comments=_capture),
+        patch.object(server_mod, "_mcp_session", lambda: "sess-1"),
+    ):
+        _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 5, "batch_id": "b1"})
+    assert seen["batch_id"] == "b1" and seen["session"] == "sess-1"
+
+
+def test_mcp_session_reads_request_header() -> None:
+    from types import SimpleNamespace
+
+    from mcp.server.lowlevel.server import request_ctx
+
+    assert server_mod._mcp_session() is None
+    ctx = SimpleNamespace(request=SimpleNamespace(headers={"mcp-session-id": "abc"}))
+    token = request_ctx.set(ctx)  # type: ignore[arg-type]
+    try:
+        assert server_mod._mcp_session() == "abc"
+    finally:
+        request_ctx.reset(token)
 
 
 def test_get_video_info_reports_total_duration() -> None:

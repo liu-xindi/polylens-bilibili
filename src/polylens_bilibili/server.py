@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 import segno
 from anyio import to_thread
 from mcp.server.fastmcp import FastMCP
+from mcp.server.lowlevel.server import request_ctx
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
@@ -241,6 +242,15 @@ def _in_thread(fn: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
+def _mcp_session() -> str | None:
+    """当前请求的 MCP 会话 ID。stdio 与内存会话没有 HTTP 请求，返回 None。"""
+    try:
+        request = request_ctx.get().request
+    except LookupError:
+        return None
+    return request.headers.get("mcp-session-id") if request is not None else None
+
+
 def _attach_elapsed(result: Any, elapsed_s: float) -> Any:
     """模型返回直接设字段；内容块列表写进末尾的 JSON 元信息块。"""
     if isinstance(result, BaseModel):
@@ -394,7 +404,8 @@ def create_server(
             raise BilibiliError("mode=hot 需要 batch_id：传一个自定的短字符串，重放同一批时沿用。")
         video_id, _ = _resolve(url)
         page = _client().get_comments(
-            video_id, count=count, cursor=cursor, sort=mode, batch_id=batch_id
+            video_id, count=count, cursor=cursor, sort=mode, batch_id=batch_id,
+            session=_mcp_session(),
         )
         comments, jq_count = encode_items("comments", page.items, Comment, jq)
         return CommentsResult(

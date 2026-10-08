@@ -1294,3 +1294,16 @@ def test_hot_failed_batch_is_not_cached():
             fetch_comments(client, aid=100, count=1, batch_id="b1")
         retry = fetch_comments(client, aid=100, count=1, batch_id="b1")
     assert [c.content for c in retry.items] == ["a"]
+
+
+def test_hot_batch_is_scoped_to_mcp_session():
+    """batch_id 由模型自取，各对话常取同名（如 a1）：不同会话互不命中。"""
+    client = _hot_pages("a", "b", "c")
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        one = fetch_comments(client, aid=100, count=1, batch_id="a1", session="s1")
+        other = fetch_comments(client, aid=100, count=1, batch_id="a1", session="s2")
+        again = fetch_comments(client, aid=100, count=1, batch_id="a1", session="s1")
+    assert [c.content for c in one.items] == ["a"]
+    assert [c.content for c in other.items] == ["b"]
+    assert [c.content for c in again.items] == ["a"]
+    assert client.get_json.call_count == 2
