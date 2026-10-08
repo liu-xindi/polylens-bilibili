@@ -1,6 +1,6 @@
 [project]
 name = "polylens-bilibili-mcp"
-version = "0.3.4"
+version = "0.4.0"
 description = "读取 B 站视频、评论、弹幕、字幕等公开信息的 MCP 服务，支持用 jq 在返回前筛选和裁剪结果，可本地运行，也可通过 HTTP + OAuth 远程接入。MCP server for reading Bilibili videos, comments, danmaku and subtitles, with jq filtering to keep responses small. Runs locally over stdio or remotely over Streamable HTTP with OAuth."
 readme = "README.md"
 license = "Apache-2.0"
