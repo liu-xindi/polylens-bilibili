@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from dataclasses import fields
 from typing import Annotated, Any, Literal
+from urllib.request import urlopen
 
 import segno
 from anyio import to_thread
@@ -183,6 +184,11 @@ class LoginStateResult(BaseModel):
     is_login: bool | None
 
 
+class VersionResult(BaseModel):
+    running: str
+    latest: str | None
+
+
 class LogoutResult(BaseModel):
     deleted: bool
     message: str
@@ -278,6 +284,16 @@ def _make_qr_png(url: str) -> bytes:
 
 
 _SERVER_INSTRUCTIONS = "读取 B 站视频信息的工具集。"
+
+_PYPI_JSON = "https://pypi.org/pypi/polylens-bilibili-mcp/json"
+
+
+def _latest_release() -> str | None:
+    try:
+        with urlopen(_PYPI_JSON, timeout=5) as resp:  # noqa: S310
+            return json.load(resp)["info"]["version"]
+    except (OSError, ValueError, KeyError):
+        return None
 
 _STATUS_MSG = {
     QrStatus.WAITING: (
@@ -731,6 +747,17 @@ def create_server(
         (login status)
         """
         return LoginStateResult(is_login=_client().get_login_status())
+
+    # 网页端会缓存工具说明，说明里写死启动时的版本，与 running 对比即可看出缓存是否过期。
+    @tool(
+        annotations=_READS_PLATFORM,
+        description=(
+            f"本说明对应版本 {__version__}。running 与之不同表示工具说明是旧缓存，需重连；"
+            "running 低于 latest 表示服务未升级。latest 查不到时为 null。(server version)"
+        ),
+    )
+    def get_version() -> VersionResult:
+        return VersionResult(running=__version__, latest=_latest_release())
 
     @tool(annotations=_LOCAL_ONLY)
     def logout() -> LogoutResult:

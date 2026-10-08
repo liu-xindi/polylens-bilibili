@@ -12,6 +12,7 @@ import anyio
 import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 
+from polylens_bilibili import __version__
 from polylens_bilibili import server as server_mod
 from polylens_bilibili.api._subtitles import SubtitleTrack
 from polylens_bilibili.models import (
@@ -36,7 +37,7 @@ _TOOL_NAMES = {
     "get_video_info", "get_parts", "get_comments", "get_comment_replies", "get_danmaku",
     "get_subtitles", "get_frame", "search_videos", "suggest_keywords", "list_up_videos",
     "get_up_info", "get_feed",
-    "get_login_status", "logout", "start_qr_login", "complete_qr_login",
+    "get_login_status", "logout", "start_qr_login", "complete_qr_login", "get_version",
 }
 
 
@@ -353,6 +354,33 @@ def test_start_qr_login_returns_inline_qr_image() -> None:
     assert result.content[0].data  # base64 PNG
     meta = json.loads(result.content[-1].text)
     assert meta["key"] == "k1"
+
+
+# ── 版本 ────────────────────────────────────────────────────────────────────
+
+
+def test_get_version_description_carries_startup_version() -> None:
+    async def scenario() -> str:
+        server = create_server_for_test()
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
+            await client.initialize()
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["get_version"].description or ""
+
+    assert f"本说明对应版本 {__version__}。" in _run(scenario)
+
+
+def test_get_version_reports_running_and_latest() -> None:
+    with patch.object(server_mod, "_latest_release", lambda: "9.9.9"):
+        assert _payload("get_version") == {"running": __version__, "latest": "9.9.9"}
+
+
+def test_latest_release_is_none_when_pypi_unreachable() -> None:
+    def fail(*_a: Any, **_k: Any) -> Any:
+        raise OSError("offline")
+
+    with patch.object(server_mod, "urlopen", fail):
+        assert server_mod._latest_release() is None
 
 
 # ── 登录类工具 ──────────────────────────────────────────────────────────────
