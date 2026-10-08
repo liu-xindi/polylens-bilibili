@@ -334,6 +334,7 @@ def create_server(
                 description=(
                     "至少取多少条主评论。平台按每页约 20 条整页返回，实际条数约为 20 的整数倍；"
                     "评论不够时返回剩余的全部。"
+                    "主评论与二级评论合计限速每分钟约 30 页（约 600 条）。"
                 )
             ),
         ],
@@ -349,7 +350,8 @@ def create_server(
                     "新开会话后，旧 cursor 只会返回已取过的内容，新旧混用时两者都会回退。"
                     "newest 按时间倒序，cursor 含位置，可重复取同一批，不受新会话影响。"
                     "需要完整抓取或断点续取时用 newest。"
-                    "newest 的结果缓存 30 分钟，cached_at 是缓存的抓取时间。"
+                    "newest 的结果按页缓存 30 分钟，cached_at 是缓存的抓取时间。"
+                    "调用没收到结果时，服务端仍会取完，之后再取直接用缓存。"
                 )
             ),
         ] = "hot",
@@ -393,7 +395,12 @@ def create_server(
         ],
         pages: Annotated[
             int,
-            Field(description="每条主评论取几页，每页 20 条。has_more 表示后面还有。"),
+            Field(
+                description=(
+                    "每条主评论取几页，每页 20 条。has_more 表示后面还有。"
+                    "与主评论合计限速每分钟约 30 页。"
+                )
+            ),
         ],
         start_page: Annotated[
             int,
@@ -417,7 +424,8 @@ def create_server(
         中途被风控或限流时，已取完的照常返回，其余的 error 里说明原因。
         parent_id 为空表示直接回复主评论，否则是所回复的那条二级评论的 id。
         parent_id 指向的二级评论不在列表里时，那条被平台隐藏了，取不到。
-        结果缓存 30 分钟，cached_at 是缓存的抓取时间。
+        结果按页缓存 30 分钟，cached_at 是缓存的抓取时间。
+        调用没收到结果时，服务端仍会取完，之后再取直接用缓存。
         image_urls、link_titles 是字符串，多个时以换行分隔。
 
         (comment replies, sub-replies, thread)
