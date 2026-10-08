@@ -168,14 +168,20 @@ def test_http_without_full_oauth_refuses_to_start(
 
 
 def test_http_without_oauth_runs_only_with_explicit_opt_in(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
 ) -> None:
     for k in ("PUBLIC_URL", "AUTH_SECRET"):
         monkeypatch.delenv(f"POLYLENS_BILIBILI_{k}", raising=False)
     monkeypatch.setenv("POLYLENS_BILIBILI_INSECURE_NO_AUTH", "1")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     ran = _no_run(monkeypatch)
-    serve.run(["--transport", "http"])
+    with caplog.at_level("INFO", logger="polylens_bilibili"):
+        serve.run(["--transport", "http"])
     assert ran == ["streamable-http"]
+    started, insecure = caplog.records
+    assert __version__ in started.getMessage() and "OAuth 关" in started.getMessage()
+    assert "凭据未保存" in started.getMessage()
+    assert insecure.levelname == "WARNING" and "INSECURE_NO_AUTH" in insecure.getMessage()
 
 
 def test_stdio_needs_no_oauth(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -399,6 +399,25 @@ def test_unparsable_url_is_tool_error() -> None:
     assert result.isError
 
 
+def test_tool_outcomes_are_logged(caplog: pytest.LogCaptureFixture) -> None:
+    """mcp 库只把异常转成错误结果，不记日志；服务端的记录全靠工具层。"""
+
+    def broken(*_a: Any, **_kw: Any) -> None:
+        raise KeyError("stat")
+
+    with caplog.at_level("INFO", logger="polylens_bilibili"):
+        with _with_client(get_login_status=True):
+            _call("get_login_status")
+        _call("get_video_info", {"url": "https://example.com/x"})
+        with _with_client(get_video_info=broken):
+            assert _call("get_video_info", {"url": BV_URL}).isError
+    ok, failed, crashed = [r for r in caplog.records if r.name == "polylens_bilibili.server"]
+    assert ok.levelname == "INFO" and "get_login_status" in ok.getMessage()
+    assert failed.levelname == "WARNING" and "无法从输入解析" in failed.getMessage()
+    assert failed.exc_info is None
+    assert crashed.levelname == "ERROR" and crashed.exc_info is not None
+
+
 # ── jq ──────────────────────────────────────────────────────────────────────
 
 

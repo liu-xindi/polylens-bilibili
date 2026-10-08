@@ -10,6 +10,7 @@ import base64
 import functools
 import io
 import json
+import logging
 import time
 from collections.abc import Callable
 from dataclasses import fields
@@ -24,6 +25,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .client import BilibiliClient, resolve_up, resolve_video
 from .credentials import delete_cookie, load_cookie, save_cookie
+from .errors import BilibiliError
 from .jqfilter import encode_items
 from .models import (
     Comment,
@@ -39,6 +41,8 @@ from .models import (
 )
 
 # ── 参数说明 ────────────────────────────────────────────────────────────────
+
+_log = logging.getLogger(__name__)
 
 _URL_DESC = "视频链接、b23.tv 短链，或裸 BV/av 号；含链接的分享文案也可直接传入。"
 _PAGE_DESC = (
@@ -216,11 +220,23 @@ def _in_thread(fn: Callable[..., Any]) -> Callable[..., Any]:
     """同步工具放到工作线程里跑，免得一个慢调用（如评论限速排队）卡住整个服务。
 
     评论请求之间仍由限速器的锁排队，其他工具互不等待。
+    mcp 库把工具异常转成错误结果返回而不记日志，所以在这里记。参数不记，其中有扫码登录的 key。
     """
+    name = fn.__name__
 
     @functools.wraps(fn)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        return await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+        start = time.monotonic()
+        try:
+            result = await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+        except BilibiliError as e:
+            _log.warning("工具 %s 失败（%.1f 秒）：%s", name, time.monotonic() - start, e)
+            raise
+        except Exception:
+            _log.exception("工具 %s 异常（%.1f 秒）", name, time.monotonic() - start)
+            raise
+        _log.info("工具 %s 完成（%.1f 秒）", name, time.monotonic() - start)
+        return result
 
     return wrapper
 

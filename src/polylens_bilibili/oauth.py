@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import secrets
 import time
@@ -33,6 +34,8 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyHttpUrl
 
 from .credentials import write_private
+
+_log = logging.getLogger(__name__)
 
 _ACCESS_TTL = 3600  # 访问令牌 1 小时；刷新令牌长期（claude.ai 后台静默续）
 _CODE_TTL = 600  # 授权码 10 分钟（库也会校验过期）
@@ -91,7 +94,12 @@ class OAuthProvider(
     def _load(self) -> dict[str, dict[str, Any]]:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except FileNotFoundError:
+            return {k: {} for k in _EMPTY}
+        except (OSError, json.JSONDecodeError) as e:
+            _log.error(
+                "OAuth 存储 %s 读取失败，按空库处理，已授权的客户端需重新授权：%r", self._path, e
+            )
             return {k: {} for k in _EMPTY}
         return {k: dict(data.get(k, {})) for k in _EMPTY}
 
@@ -318,6 +326,11 @@ def register_consent_route(mcp: Any, provider: OAuthProvider, auth_secret: str) 
         req_id, secret = str(form.get("req", "")), str(form.get("secret", ""))
         label = provider.pending_label(req_id) or ""
         outcome, redirect = gate.submit(req_id, secret)
+        peer = request.client.host if request.client else "?"
+        if outcome == "granted":
+            _log.info("OAuth 授权通过：客户端 %s，来源 %s", label, peer)
+        else:
+            _log.warning("OAuth 授权未通过（%s）：客户端 %s，来源 %s", outcome, label or "?", peer)
         if outcome == "granted" and redirect:
             return RedirectResponse(url=redirect, status_code=302)
         if outcome == "wrong":

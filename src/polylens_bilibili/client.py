@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -40,6 +41,8 @@ from .models import (
     VideoInfo,
     VideoPart,
 )
+
+_log = logging.getLogger(__name__)
 
 _BV_RE = re.compile(r"BV[0-9A-Za-z]+")
 _AV_RE = re.compile(r"\bav(\d+)\b", re.IGNORECASE)
@@ -159,7 +162,8 @@ class BilibiliClient:
         """
         try:
             return fetch_nav(self._http).is_login
-        except (BilibiliError, _RateLimited, OSError, ValueError, KeyError):
+        except (BilibiliError, _RateLimited, OSError, ValueError, KeyError) as e:
+            _log.warning("无法核验登录状态：%r", e)
             return None
 
     def start_qr_login(self) -> QrLoginSession:
