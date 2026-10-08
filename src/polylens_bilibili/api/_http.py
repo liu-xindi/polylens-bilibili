@@ -272,7 +272,8 @@ class HttpClient:
 
     def _rate_limited(self, signal: str, path: str) -> _RateLimited:
         now = time.monotonic()
-        ages = [round(now - t, 1) for t in reversed(_recent.get(_group(path), ()))]
+        recent = tuple(_recent.get(_group(path), ()))  # 先复制：其他线程可能正在追加
+        ages = [round(now - t, 1) for t in reversed(recent)]
         _log.warning(
             "风控信号 %s：%s，带 cookie=%s，同组最近请求距今（秒）%s",
             signal, path, bool(self.cookie), ages,

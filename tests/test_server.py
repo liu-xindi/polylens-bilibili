@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
@@ -473,6 +474,39 @@ def test_bad_jq_is_tool_error_with_fields() -> None:
         result = _call("get_parts", {"url": BV_URL, "jq": ".["})
     assert result.isError
     assert "page,part,duration" in result.content[0].text
+
+
+# ── 并发 ────────────────────────────────────────────────────────────────────
+
+
+def test_slow_tool_does_not_block_other_tools() -> None:
+    """评论限速排队这类慢调用不能卡住整个服务（10-08 实测：快工具陪等两分钟后被客户端判超时）。"""
+    release = threading.Event()
+
+    def slow_comments(*args: Any, **kwargs: Any) -> Page[Comment]:
+        release.wait(5)
+        return Page(items=[])
+
+    async def scenario() -> list[str]:
+        order: list[str] = []
+        server = create_server_for_test()
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
+            await client.initialize()
+
+            async def slow() -> None:
+                await client.call_tool("get_comments", {"url": BV_URL, "count": 1, "jq": "."})
+                order.append("slow")
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(slow)
+                await anyio.sleep(0.2)
+                await client.call_tool("suggest_keywords", {"term": "x"})
+                order.append("fast")
+                release.set()
+        return order
+
+    with _with_client(get_comments=slow_comments, suggest=["x"]):
+        assert _run(scenario) == ["fast", "slow"]
 
 
 # ── elapsed_s ───────────────────────────────────────────────────────────────

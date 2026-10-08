@@ -16,6 +16,7 @@ from dataclasses import fields
 from typing import Annotated, Any, Literal
 
 import segno
+from anyio import to_thread
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
@@ -211,6 +212,19 @@ def _timed(fn: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
+def _in_thread(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """同步工具放到工作线程里跑，免得一个慢调用（如评论限速排队）卡住整个服务。
+
+    评论请求之间仍由限速器的锁排队，其他工具互不等待。
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return await to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+
+    return wrapper
+
+
 def _attach_elapsed(result: Any, elapsed_s: float) -> Any:
     """模型返回直接设字段；内容块列表写进末尾的 JSON 元信息块。"""
     if isinstance(result, BaseModel):
@@ -286,11 +300,14 @@ def create_server(
     # FastMCP 1.x 不收 version，不设时握手报的是 mcp 库自身的版本。
     mcp._mcp_server.version = __version__
 
+    def tool(**kwargs: Any) -> Callable[[Callable[..., Any]], Any]:
+        return lambda fn: mcp.tool(**kwargs)(_in_thread(fn))
+
     if oauth_provider is not None and auth_secret:
         from .oauth import register_consent_route
         register_consent_route(mcp, oauth_provider, auth_secret)
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_video_info(
         url: Annotated[str, Field(description=_URL_DESC)],
@@ -307,7 +324,7 @@ def create_server(
         info = _client().get_video_info(video_id, part)
         return VideoInfoResult(**info.model_dump())
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_comments(
         url: Annotated[str, Field(description=_URL_DESC)],
@@ -366,7 +383,7 @@ def create_server(
             message=page.rate_limited,
         )
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_comment_replies(
         url: Annotated[str, Field(description=_URL_DESC)],
@@ -428,7 +445,7 @@ def create_server(
             )
         return CommentRepliesResult(video_id=video_id, results=results)
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_danmaku(
         url: Annotated[str, Field(description=_URL_DESC)],
@@ -462,7 +479,7 @@ def create_server(
             video_id=video_id, count=len(bullets), danmaku=danmaku, jq_count=jq_count
         )
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_subtitles(
         url: Annotated[str, Field(description=_URL_DESC)],
@@ -498,7 +515,7 @@ def create_server(
             jq_count=jq_count,
         )
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_parts(
         url: Annotated[str, Field(description=_URL_DESC)],
@@ -521,7 +538,7 @@ def create_server(
 
     # structured_output=False：FastMCP 默认会把返回值复制进 structuredContent，对本工具即把图片的
     # base64 又装一份；部分客户端会将它序列化为文本传给模型，同一张图被当文本重复计入上下文。
-    @mcp.tool(structured_output=False, annotations=_READS_PLATFORM)
+    @tool(structured_output=False, annotations=_READS_PLATFORM)
     @_timed
     def get_frame(
         url: Annotated[str, Field(description=_URL_DESC)],
@@ -542,7 +559,7 @@ def create_server(
             TextContent(type="text", text=json.dumps(meta, ensure_ascii=False)),
         ]
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def search_videos(
         query: Annotated[
@@ -577,7 +594,7 @@ def create_server(
             next_cursor=page.next_cursor,
         )
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def suggest_keywords(
         term: Annotated[str, Field(description="已输入的关键词，可以只是开头几个字。")],
@@ -591,7 +608,7 @@ def create_server(
         suggestions = _client().suggest(term)
         return SuggestResult(count=len(suggestions), suggestions=suggestions)
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def list_up_videos(
         author_url: Annotated[
@@ -632,7 +649,7 @@ def create_server(
             next_cursor=page.next_cursor,
         )
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_up_info(
         author_url: Annotated[
@@ -646,7 +663,7 @@ def create_server(
         info = _client().get_up_info(resolve_up(author_url))
         return UpInfoResult(**info.model_dump())
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     @_timed
     def get_feed(
         *,
@@ -663,7 +680,7 @@ def create_server(
         feed, jq_count = encode_items("feed", items, FeedItem, jq)
         return FeedResult(count=len(items), feed=feed, jq_count=jq_count)
 
-    @mcp.tool(annotations=_READS_PLATFORM)
+    @tool(annotations=_READS_PLATFORM)
     def get_login_status() -> LoginStateResult:
         """联网向平台核验。
 
@@ -673,7 +690,7 @@ def create_server(
         """
         return LoginStateResult(is_login=_client().get_login_status())
 
-    @mcp.tool(annotations=_LOCAL_ONLY)
+    @tool(annotations=_LOCAL_ONLY)
     def logout() -> LogoutResult:
         """删除本地保存的凭据。(log out, sign out)"""
         deleted = delete_cookie()
@@ -683,7 +700,7 @@ def create_server(
         )
 
     # structured_output=False 同 get_frame：二维码内联返回，不进结构化通道。
-    @mcp.tool(structured_output=False, annotations=_READS_PLATFORM)
+    @tool(structured_output=False, annotations=_READS_PLATFORM)
     def start_qr_login() -> list[ImageContent | TextContent]:
         """返回内联二维码图片。不写入本地凭据，由 complete_qr_login 写入。
 
@@ -699,7 +716,7 @@ def create_server(
             TextContent(type="text", text=json.dumps(meta, ensure_ascii=False)),
         ]
 
-    @mcp.tool(annotations=_WRITES_CREDENTIAL)
+    @tool(annotations=_WRITES_CREDENTIAL)
     def complete_qr_login(
         key: Annotated[str, Field(description="start_qr_login 返回的 key。")],
     ) -> QrCheckResult:
