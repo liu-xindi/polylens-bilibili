@@ -6,6 +6,7 @@ import json
 from urllib.parse import parse_qs, urlparse
 
 import anyio
+import pytest
 from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyUrl
@@ -302,6 +303,39 @@ def test_pending_count_is_capped_oldest_evicted(tmp_path) -> None:
     assert len(p._pending) == oauth._PENDING_MAX
     assert p.pending_label(first) is None  # 最旧的被淘汰
     assert p.pending_label(reqs[-1]) is not None  # 最新的在
+
+
+def test_missing_store_is_silent_but_corrupt_store_is_logged(
+    tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """损坏的存储按空库处理会让所有已授权客户端掉线，必须留下原因。"""
+    p = _provider(tmp_path)
+    with caplog.at_level("WARNING"):
+        assert _run(p.get_client("client-1")) is None
+        assert caplog.records == []
+        (tmp_path / "store.json").write_text("{", encoding="utf-8")
+        assert _run(p.get_client("client-1")) is None
+    assert caplog.records[0].levelname == "ERROR"
+    assert "store.json" in caplog.records[0].getMessage()
+
+
+def test_consent_route_logs_outcomes(tmp_path, monkeypatch, caplog) -> None:
+    from starlette.testclient import TestClient
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    mcp = create_server(public_url="https://mcp.example.com", auth_secret="right")
+    provider = mcp._auth_server_provider
+    assert isinstance(provider, oauth.OAuthProvider)
+    app = TestClient(mcp.streamable_http_app(), base_url="https://mcp.example.com")
+
+    req = _new_req(provider)
+    with caplog.at_level("INFO", logger="polylens_bilibili"):
+        app.post("/consent", data={"req": req, "secret": "x"})
+        app.post("/consent", data={"req": req, "secret": "right"}, follow_redirects=False)
+    wrong, granted = [r for r in caplog.records if r.name == "polylens_bilibili.oauth"]
+    assert wrong.levelname == "WARNING" and "wrong" in wrong.getMessage()
+    assert granted.levelname == "INFO" and "Claude" in granted.getMessage()
+    assert "right" not in wrong.getMessage() + granted.getMessage()
 
 
 def test_consent_route_maps_outcomes_to_status(tmp_path, monkeypatch) -> None:

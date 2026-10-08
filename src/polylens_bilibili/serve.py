@@ -7,12 +7,16 @@ http 用 FastMCP 自带的 streamable-http，uvicorn 随 mcp[cli] 一起来，�
 from __future__ import annotations
 
 import argparse
+import logging
 import os
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from . import __version__
+from .credentials import load_cookie
 from .server import create_server
+
+_log = logging.getLogger(__name__)
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = 6622
@@ -84,12 +88,20 @@ def run(argv: list[str] | None = None) -> None:
         public_url=config.public_url if config.oauth_enabled else None,
         auth_secret=config.auth_secret if config.oauth_enabled else None,
     )
+    listen = (
+        f"，监听 {config.host}:{config.port}，OAuth {'开' if config.oauth_enabled else '关'}"
+        if config.transport == "http"
+        else ""
+    )
+    _log.info(
+        "polylens-bilibili %s 启动：传输 %s%s，B 站凭据%s",
+        __version__, config.transport, listen, "已保存" if load_cookie() else "未保存",
+    )
     if config.transport == "http":
         if not config.oauth_enabled:
-            print(
-                f"{_ENV_PREFIX}INSECURE_NO_AUTH 已开启：当前无鉴权，"
-                "仅适合本机调试，不要暴露于公网。",
-                file=sys.stderr,
+            _log.warning(
+                "%sINSECURE_NO_AUTH 已开启：当前无鉴权，仅适合本机调试，不要暴露于公网。",
+                _ENV_PREFIX,
             )
         server.run(transport="streamable-http")
     else:

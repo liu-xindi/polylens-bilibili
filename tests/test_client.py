@@ -121,10 +121,13 @@ def test_get_login_status_reports_platform_answer(is_login: bool) -> None:
     "failure",
     [OSError("network down"), BilibiliError("接口返回失败: -400"), KeyError("wbi_img")],
 )
-def test_get_login_status_returns_none_when_unverifiable(failure: Exception) -> None:
-    """网络不可达、平台报错、响应改形状都归为 null，与"确定未登录"区分开。"""
-    with patch.object(client_mod, "fetch_nav", side_effect=failure):
+def test_get_login_status_returns_none_when_unverifiable(
+    failure: Exception, caplog: pytest.LogCaptureFixture
+) -> None:
+    """网络不可达、平台报错、响应改形状都归为 null，与"确定未登录"区分开；原因只进日志。"""
+    with patch.object(client_mod, "fetch_nav", side_effect=failure), caplog.at_level("WARNING"):
         assert BilibiliClient().get_login_status() is None
+    assert repr(failure) in caplog.records[0].getMessage()
 
 
 def test_get_login_status_lets_unexpected_errors_surface() -> None:
