@@ -346,13 +346,13 @@ def create_server(
                 description=(
                     "排序方式：hot 是平台的综合排序。"
                     "hot 的 cursor 只标识浏览会话，进度记在平台侧，"
-                    "同一 cursor 配新的 batch_id 返回下一批，配用过的 batch_id 重放那一批；"
+                    "翻页与重放靠 batch_id；"
                     "同一视频同一时间只用一个 hot cursor："
                     "新开会话后，旧 cursor 只会返回已取过的内容，新旧混用时两者都会回退。"
                     "newest 按时间倒序，cursor 含位置，可重复取同一批，不受新会话影响。"
                     "需要完整抓取或断点续取时用 newest。"
-                    "newest 按页缓存 30 分钟，hot 按 batch_id 缓存整批 30 分钟。"
-                    "newest 的缓存与 count、jq 无关，命中不续期，最多 1000 页。"
+                    "缓存：newest 按页缓存 30 分钟，与 count、jq 无关，命中不续期，最多 1000 页；"
+                    "hot 按 batch_id 缓存整批，见 batch_id。"
                     "调用没收到结果时服务端仍会取完，之后再取直接用缓存。"
                 )
             ),
