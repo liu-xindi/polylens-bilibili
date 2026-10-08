@@ -9,6 +9,7 @@ import base64
 import binascii
 import json
 from collections.abc import Callable, Hashable
+from dataclasses import replace
 from functools import partial
 from typing import Any, NamedTuple
 
@@ -283,6 +284,7 @@ def fetch_comments(
     count: int,
     cursor: str | None = None,
     sort: str = "hot",
+    batch_id: str | None = None,
 ) -> Page[Comment]:
     """抓取视频主评论（纯主评论，不含二级评论）。置顶评论插入列表最前面。
 
@@ -293,7 +295,8 @@ def fetch_comments(
     同一账号对同一视频的多个热度序会话互相干扰：新开一个会话后，旧游标只返回已取过的内容，
     新旧游标混用时两者都会回退（10-07 实测）；平台也不校验 key，伪造的 key 照样返回数据。
     不同视频之间互不影响。
-    时间序的游标带位置，可重放，不受新会话影响；因此时间序的页走缓存，热度序不走。
+    时间序的游标带位置，可重放，不受新会话影响；因此时间序的页走缓存。
+    热度序要重放只能靠调用方给的 batch_id：同一游标配同一 batch_id 时整批缓存，再取时原样返回。
 
     中途触发风控时返回已取到的部分并标 rate_limited：热度序下这些页平台已记为取过，
     丢掉它们，调用方用同一游标重试也取不回来。一页都没取到才抛 RateLimitedError。
@@ -308,6 +311,20 @@ def fetch_comments(
         raise BilibiliError(f"未知的排序方式 {sort!r}，可选：{'、'.join(_SORT_MODE)}")
     if cursor:
         _check_cursor(cursor)
+    key = None
+    if sort == "hot" and batch_id:
+        key = ("hot", client.account, aid, cursor or "", batch_id)
+    if key is not None and (hit := page_cache.get(key)) is not None:
+        return replace(hit.value, cached_at=to_local_time(hit.fetched_at))
+    page = _collect_main(client, aid, count=count, cursor=cursor, sort=sort)
+    if key is not None and page.items:
+        page_cache.put(key, page)
+    return page
+
+
+def _collect_main(
+    client: HttpClient, aid: int, *, count: int, cursor: str | None, sort: str
+) -> Page[Comment]:
     mode = _SORT_MODE[sort]
     nav = fetch_nav(client)
     if not nav.is_login:

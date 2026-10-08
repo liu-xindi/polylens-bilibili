@@ -1226,3 +1226,71 @@ def test_cached_pages_served_while_breaker_open(comment_guard: Any):
         with pytest.raises(RateLimitedError):
             fetch_comments(client, aid=200, count=20, sort="newest")
     assert len(page.items) == 20 and len(platform.calls) == 1
+
+
+# ── 热度序按 batch_id 重放 ──────────────────────────────────────────────────
+
+
+def _hot_pages(*contents: str) -> MagicMock:
+    """每次请求依次返回一页（各一条），都声称后面还有。"""
+    client = MagicMock()
+    client.get_json.side_effect = [
+        _page([_reply(i, c)], is_end=False, next_offset="SESSION")
+        for i, c in enumerate(contents, start=1)
+    ]
+    return client
+
+
+def test_hot_same_batch_id_replays_without_requests():
+    client = _hot_pages("a", "b")
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        first = fetch_comments(client, aid=100, count=1, batch_id="b1")
+        again = fetch_comments(client, aid=100, count=1, batch_id="b1")
+    assert client.get_json.call_count == 1
+    assert [c.content for c in again.items] == [c.content for c in first.items] == ["a"]
+    assert first.cached_at is None and again.cached_at is not None
+
+
+def test_hot_new_batch_id_takes_next_batch():
+    client = _hot_pages("a", "b")
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        first = fetch_comments(client, aid=100, count=1, batch_id="b1")
+        second = fetch_comments(client, aid=100, count=1, batch_id="b2")
+    assert [c.content for c in first.items] == ["a"]
+    assert [c.content for c in second.items] == ["b"]
+
+
+def test_hot_without_batch_id_is_not_cached():
+    client = _hot_pages("a", "b")
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(client, aid=100, count=1)
+        second = fetch_comments(client, aid=100, count=1)
+    assert [c.content for c in second.items] == ["b"]
+
+
+def test_hot_partial_batch_is_replayed_as_is():
+    """风控前取到的部分平台已记为取过，重放时原样给回，连同风控说明。"""
+    client = MagicMock()
+    client.get_json.side_effect = [
+        _page([_reply(1, "a")], is_end=False, next_offset="SESSION"),
+        _RateLimited("-352", "/x"),
+    ]
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        first = fetch_comments(client, aid=100, count=40, batch_id="b1")
+        again = fetch_comments(client, aid=100, count=40, batch_id="b1")
+    assert client.get_json.call_count == 2
+    assert [c.content for c in again.items] == ["a"]
+    assert again.rate_limited == first.rate_limited is not None
+
+
+def test_hot_failed_batch_is_not_cached():
+    client = MagicMock()
+    client.get_json.side_effect = [
+        _RateLimited("-352", "/x"),
+        _page([_reply(1, "a")], is_end=False, next_offset="SESSION"),
+    ]
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        with pytest.raises(RateLimitedError):
+            fetch_comments(client, aid=100, count=1, batch_id="b1")
+        retry = fetch_comments(client, aid=100, count=1, batch_id="b1")
+    assert [c.content for c in retry.items] == ["a"]

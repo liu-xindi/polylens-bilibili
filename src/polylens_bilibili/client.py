@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
@@ -173,12 +174,21 @@ class BilibiliClient:
         return info
 
     def get_comments(
-        self, video_id: str, *, count: int, cursor: str | None = None, sort: str = "hot"
+        self,
+        video_id: str,
+        *,
+        count: int,
+        cursor: str | None = None,
+        sort: str = "hot",
+        batch_id: str | None = None,
     ) -> Page[Comment]:
         if sort != "newest":
             _comments_open()
         _info, aid, _cid = build_video_info(self._view(video_id))
-        return fetch_comments(self._http, aid, count=count, cursor=cursor, sort=sort)
+        with _comment_requests:
+            return fetch_comments(
+                self._http, aid, count=count, cursor=cursor, sort=sort, batch_id=batch_id
+            )
 
     def get_comment_replies(
         self,
@@ -191,9 +201,10 @@ class BilibiliClient:
         if not comment_ids:
             return []
         _info, aid, _cid = build_video_info(self._view(video_id))
-        return fetch_replies(
-            self._http, aid, [str(c) for c in comment_ids], start_page=start_page, pages=pages
-        )
+        with _comment_requests:
+            return fetch_replies(
+                self._http, aid, [str(c) for c in comment_ids], start_page=start_page, pages=pages
+            )
 
     def get_danmaku(
         self, video_id: str, *, count: int, page: int = 1
@@ -253,6 +264,11 @@ class BilibiliClient:
 
     def get_feed(self) -> list[FeedItem]:
         return fetch_feed(self._http)
+
+
+# 评论请求整个串行：并发时同一个热度序会话会被几个请求交错推进，评论被拆散到各个请求里；
+# 时间序则会重复抓取还没进缓存的页。限速本来就是全局的，串行不降低吞吐。
+_comment_requests = threading.Lock()
 
 
 def _comments_open() -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -16,6 +18,7 @@ from polylens_bilibili.client import (
     resolve_video,
 )
 from polylens_bilibili.errors import BilibiliError, RateLimitedError
+from polylens_bilibili.models import Page
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
 
@@ -352,3 +355,37 @@ def test_hot_comments_refuse_while_breaker_open(comment_guard: Any) -> None:
     with patch("polylens_bilibili.client.fetch_view", side_effect=AssertionError("不该发请求")):
         with pytest.raises(RateLimitedError, match="约 15 分钟后再试"):
             client.get_comments("BV1xx", count=20)
+
+
+# ── 评论请求串行 ────────────────────────────────────────────────────────────
+
+
+def test_comment_requests_run_one_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """并发时同一热度序会话会被交错推进，评论被拆散到几个请求里；故评论请求整个串行。"""
+    active = peak = 0
+    lock = threading.Lock()
+
+    def fake_fetch(*args: Any, **kwargs: Any) -> Any:
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return Page(items=[]) if "count" in kwargs else []
+
+    monkeypatch.setattr(client_mod, "fetch_comments", fake_fetch)
+    monkeypatch.setattr(client_mod, "fetch_replies", fake_fetch)
+    monkeypatch.setattr(BilibiliClient, "_view", lambda self, vid: _view_stub())
+    calls = [
+        lambda: BilibiliClient().get_comments("BV1", count=1, sort="newest"),
+        lambda: BilibiliClient().get_comments("BV2", count=1, sort="hot", batch_id="b"),
+        lambda: BilibiliClient().get_comment_replies("BV3", comment_ids=["1"], pages=1),
+    ] * 2
+    threads = [threading.Thread(target=c) for c in calls]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak == 1

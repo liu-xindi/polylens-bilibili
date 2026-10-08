@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .client import BilibiliClient, resolve_up, resolve_video
 from .credentials import delete_cookie, load_cookie, save_cookie
+from .errors import BilibiliError
 from .jqfilter import encode_items
 from .models import (
     Comment,
@@ -345,27 +346,29 @@ def create_server(
                 description=(
                     "排序方式：hot 是平台的综合排序。"
                     "hot 的 cursor 只标识浏览会话，进度记在平台侧，"
-                    "同一 cursor 每次调用都返回下一批，不能重放某一批；"
+                    "同一 cursor 配新的 batch_id 返回下一批，配用过的 batch_id 重放那一批；"
                     "同一视频同一时间只用一个 hot cursor："
                     "新开会话后，旧 cursor 只会返回已取过的内容，新旧混用时两者都会回退。"
                     "newest 按时间倒序，cursor 含位置，可重复取同一批，不受新会话影响。"
                     "需要完整抓取或断点续取时用 newest。"
-                    "newest 按页缓存 30 分钟，hot 不缓存。"
-                    "缓存与 count、jq 无关，命中不续期，最多 1000 页；"
+                    "newest 按页缓存 30 分钟，hot 按 batch_id 缓存整批 30 分钟。"
+                    "newest 的缓存与 count、jq 无关，命中不续期，最多 1000 页；"
                     "缓存期间的新评论看不到，cached_at 是抓取时间。"
                     "调用没收到结果时服务端仍会取完，之后再取直接用缓存。"
                 )
             ),
         ] = "hot",
-        *,
-        jq: Annotated[
-            str,
+        batch_id: Annotated[
+            str | None,
             Field(
-                description=_jq_desc(Comment, paged=True)
-                + "hot 下若还要续取，不要用 jq 截取条数（如 .[:N]）："
-                "续取从整批之后开始，截掉的评论取不回。"
+                description=(
+                    "mode=hot 时必填。自定的短字符串：同一 cursor 配同一个值返回同一批"
+                    "（与 count、jq 无关，缓存 30 分钟），换新值才取下一批。"
+                )
             ),
-        ],
+        ] = None,
+        *,
+        jq: Annotated[str, Field(description=_jq_desc(Comment, paged=True))],
     ) -> CommentsResult:
         """不含二级评论，二级评论通过 get_comment_replies 获取。需要登录。
 
@@ -373,8 +376,12 @@ def create_server(
 
         (video comments)
         """
+        if mode == "hot" and not batch_id:
+            raise BilibiliError("mode=hot 需要 batch_id：传一个自定的短字符串，重放同一批时沿用。")
         video_id, _ = _resolve(url)
-        page = _client().get_comments(video_id, count=count, cursor=cursor, sort=mode)
+        page = _client().get_comments(
+            video_id, count=count, cursor=cursor, sort=mode, batch_id=batch_id
+        )
         comments, jq_count = encode_items("comments", page.items, Comment, jq)
         return CommentsResult(
             video_id=video_id,

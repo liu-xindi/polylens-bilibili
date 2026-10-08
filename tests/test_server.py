@@ -152,7 +152,7 @@ def _comment(cid: str, content: str, **kw: Any) -> Comment:
 def test_get_comments_returns_toon_and_paging() -> None:
     page = Page(items=[_comment("1", "a"), _comment("2", "b")], has_more=True, next_cursor="tok")
     with _with_client(get_comments=page):
-        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 2})
+        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "batch_id": "b1", "count": 2})
     assert payload["video_id"] == "BV1xx411c7mD"
     assert payload["count"] == 2
     assert payload["has_more"] is True
@@ -166,14 +166,16 @@ def test_get_comments_returns_toon_and_paging() -> None:
 def test_get_comments_rate_limited_partial_carries_message() -> None:
     page = Page(items=[], has_more=True, next_cursor="SESSION", rate_limited="只取到部分")
     with _with_client(get_comments=page):
-        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 40})
+        payload = _payload(
+            "get_comments", {"jq": ".", "url": BV_URL, "batch_id": "b1", "count": 40}
+        )
     assert payload["next_cursor"] == "SESSION"
     assert payload["message"] == "只取到部分"
 
 
 def test_get_comments_omits_next_cursor_at_end() -> None:
     with _with_client(get_comments=Page(items=[], has_more=False)):
-        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 5})
+        payload = _payload("get_comments", {"jq": ".", "url": BV_URL, "batch_id": "b1", "count": 5})
     assert payload["has_more"] is False
     assert payload["next_cursor"] is None
     assert payload["message"] is None
@@ -426,7 +428,10 @@ def test_get_comments_jq_keeps_count_and_paging() -> None:
     with _with_client(get_comments=page):
         payload = _payload(
             "get_comments",
-            {"url": BV_URL, "count": 2, "jq": '[.[] | select(.content == "b") | {id, content}]'},
+            {
+                "url": BV_URL, "count": 2, "batch_id": "b1",
+                "jq": '[.[] | select(.content == "b") | {id, content}]',
+            },
         )
     assert payload["count"] == 2
     assert payload["jq_count"] == 1
@@ -494,7 +499,9 @@ def test_slow_tool_does_not_block_other_tools() -> None:
             await client.initialize()
 
             async def slow() -> None:
-                await client.call_tool("get_comments", {"url": BV_URL, "count": 1, "jq": "."})
+                await client.call_tool(
+                    "get_comments", {"url": BV_URL, "batch_id": "b1", "count": 1, "jq": "."}
+                )
                 order.append("slow")
 
             async with anyio.create_task_group() as tg:
@@ -516,7 +523,10 @@ def test_slow_tool_does_not_block_other_tools() -> None:
     ("tool", "args", "behaviour"),
     [
         ("get_video_info", {"url": BV_URL}, {"get_video_info": VideoInfo(id="B", title="t")}),
-        ("get_comments", {"jq": ".", "url": BV_URL, "count": 1}, {"get_comments": Page(items=[])}),
+        (
+            "get_comments", {"jq": ".", "url": BV_URL, "batch_id": "b1", "count": 1},
+            {"get_comments": Page(items=[])},
+        ),
         (
             "get_subtitles", {"jq": ".", "url": BV_URL},
             {"get_subtitles": SubtitleTrack([], None, [])},
@@ -556,10 +566,19 @@ def test_get_comments_exposes_sort_modes() -> None:
     assert spec.get("default") == "hot"
 
 
+def test_hot_comments_require_batch_id() -> None:
+    called: list[int] = []
+    with _with_client(get_comments=lambda *a, **kw: called.append(1) or Page(items=[])):
+        result = _call("get_comments", {"url": BV_URL, "count": 1, "jq": "."})
+    assert result.isError
+    assert "batch_id" in result.content[0].text
+    assert not called
+
+
 def test_get_comments_passes_sort_through() -> None:
     seen: dict[str, object] = {}
 
-    def _capture(video_id, *, count, cursor=None, sort="hot"):
+    def _capture(video_id, *, count, cursor=None, sort="hot", batch_id=None):
         seen.update(video_id=video_id, count=count, sort=sort)
         return Page(items=[])
 
