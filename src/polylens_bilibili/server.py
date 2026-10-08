@@ -771,14 +771,19 @@ def create_server(
     # structured_output=False 同 get_frame：二维码内联返回，不进结构化通道。
     @tool(structured_output=False, annotations=_READS_PLATFORM)
     def start_qr_login() -> list[ImageContent | TextContent]:
-        """返回内联二维码图片。不写入本地凭据，由 complete_qr_login 写入。
+        """返回内联二维码图片和对应的链接 url。不写入本地凭据，由 complete_qr_login 写入。
 
         (QR code login)
         """
         session = BilibiliClient().start_qr_login()
         meta = {
             "key": session.key,
-            "message": "用 B站 App 扫描这张二维码，扫完并在手机上确认后调用 complete_qr_login。",
+            "url": session.url,
+            "message": (
+                "把 url 给用户，手机上点开会跳转 B站 App 确认登录。"
+                "用户看不到这张二维码时，用 url 生成二维码给用户。"
+                "用户确认后，调用 complete_qr_login。"
+            ),
         }
         return [
             _png_block(_make_qr_png(session.url), "image/png"),

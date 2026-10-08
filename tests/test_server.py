@@ -354,6 +354,7 @@ def test_start_qr_login_returns_inline_qr_image() -> None:
     assert result.content[0].data  # base64 PNG
     meta = json.loads(result.content[-1].text)
     assert meta["key"] == "k1"
+    assert meta["url"] == session.url
 
 
 # ── 版本 ────────────────────────────────────────────────────────────────────
