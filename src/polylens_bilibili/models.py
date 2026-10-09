@@ -127,7 +127,8 @@ class Page[Item]:
     has_more: bool = False
     next_cursor: str | None = None
     rate_limited: str | None = None  # 中途触发风控时给调用方的说明；有值时这批只有风控前取到的部分
-    cached_at: str | None = None  # 这批用到缓存时，缓存里最早一页的抓取时间
+    from_cache: bool = False
+    cached_at: str | None = None  # 来自缓存时的抓取时间
 
 
 @dataclass(slots=True)
@@ -164,6 +165,15 @@ class ReplyThread:
     withheld: int = 0  # 平台声称有、却不肯列出的二级评论条数（见 _comments._withheld_count）
     total: int | None = None  # 平台能列出的二级评论总数，用来算页数
     error: str | None = None  # 这条主评论取不到时的原因，此时 page 为空
+
+
+@dataclass(slots=True)
+class ReplyBatch:
+    """一次二级评论调用的全部结果，整批缓存。"""
+
+    threads: list[ReplyThread]
+    from_cache: bool = False
+    cached_at: str | None = None  # 来自缓存时的抓取时间
 
 
 @dataclass(slots=True)

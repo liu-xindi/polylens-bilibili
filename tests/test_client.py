@@ -17,7 +17,7 @@ from polylens_bilibili.client import (
     resolve_up,
     resolve_video,
 )
-from polylens_bilibili.errors import BilibiliError, RateLimitedError
+from polylens_bilibili.errors import BilibiliError
 from polylens_bilibili.models import Page
 
 BV_URL = "https://www.bilibili.com/video/BV1xx411c7mD/"
@@ -146,7 +146,7 @@ def test_comment_replies_with_empty_ids_returns_empty(monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         BilibiliClient, "_view", lambda self, vid: called.append(1) or {}  # type: ignore[func-returns-value]
     )
-    assert BilibiliClient().get_comment_replies("BV1xx", comment_ids=[], pages=1) == []
+    assert BilibiliClient().get_comment_replies("BV1xx", comment_ids=[], pages=1).threads == []
     assert not called
 
 
@@ -349,15 +349,6 @@ def test_resolve_up_accepts_space_link_or_mid(text: str) -> None:
 def test_resolve_up_rejects_other_input() -> None:
     with pytest.raises(BilibiliError):
         resolve_up("高中物理老何")
-
-
-def test_hot_comments_refuse_while_breaker_open(comment_guard: Any) -> None:
-    """热度序不走缓存，熔断期间连取视频信息的请求也不发。"""
-    comment_guard.failed("412")
-    client = BilibiliClient()
-    with patch("polylens_bilibili.client.fetch_view", side_effect=AssertionError("不该发请求")):
-        with pytest.raises(RateLimitedError, match="约 15 分钟后再试"):
-            client.get_comments("BV1xx", count=20)
 
 
 # ── 评论请求串行 ────────────────────────────────────────────────────────────

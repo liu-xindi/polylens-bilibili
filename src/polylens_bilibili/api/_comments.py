@@ -8,16 +8,15 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from collections.abc import Callable, Hashable
+from collections.abc import Hashable
 from dataclasses import replace
-from functools import partial
 from typing import Any, NamedTuple
 
 from ..errors import AuthRequiredError, BilibiliError, RateLimitedError
-from ..models import Comment, Page, ReplyThread, space_url, to_local_time
+from ..models import Comment, Page, ReplyBatch, ReplyThread, space_url, to_local_time
 from ._constants import ENDPOINTS, REPLY_PAGE_SIZE
 from ._http import HttpClient, _RateLimited
-from ._page_cache import page_cache
+from ._result_cache import result_cache
 from ._search import _int_or_none
 from ._signing import fetch_nav, sign_params
 
@@ -126,21 +125,11 @@ class _MainPage(NamedTuple):
     next_offset: str | None  # None 表示到底
 
 
-def _replayable[P: (_ThreadPage, _MainPage)](
-    key: Hashable, fetch: Callable[[], P]
-) -> tuple[P, int | None]:
-    """先查缓存，未命中再请求。返回页与命中时的抓取时刻；空页可能是平台临时异常，不缓存。"""
-    hit = page_cache.get(key)
-    if hit is not None:
-        return hit.value, hit.fetched_at
-    page = fetch()
-    if page.replies:
-        page_cache.put(key, page)
-    return page, None
-
-
-def _oldest(a: int | None, b: int | None) -> int | None:
-    return b if a is None else a if b is None else min(a, b)
+def _cached[T: (Page[Comment], ReplyBatch)](key: Hashable) -> T | None:
+    hit = result_cache.get(key)
+    if hit is None:
+        return None
+    return replace(hit.value, from_cache=True, cached_at=to_local_time(hit.fetched_at))
 
 
 def _fetch_thread_page(client: HttpClient, aid: int, root_id: int, pn: int) -> _ThreadPage:
@@ -167,14 +156,9 @@ def _fetch_thread(
     root_id = int(comment_id)
     collected: list[Comment] = []
     reached_end = False
-    fetched_at: int | None = None
     pn = start
     for pn in range(start, start + pages):
-        page, hit_at = _replayable(
-            ("sub", client.account, aid, root_id, pn),
-            partial(_fetch_thread_page, client, aid, root_id, pn),
-        )
-        fetched_at = _oldest(fetched_at, hit_at)
+        page = _fetch_thread_page(client, aid, root_id, pn)
         collected.extend(page.replies)
         if len(page.replies) < REPLY_PAGE_SIZE:
             reached_end = True
@@ -184,7 +168,7 @@ def _fetch_thread(
         reached_end = True
     return ReplyThread(
         comment_id=comment_id,
-        page=Page(items=collected, has_more=not reached_end, cached_at=to_local_time(fetched_at)),
+        page=Page(items=collected, has_more=not reached_end),
         withheld=page.withheld,
         total=page.total,
     )
@@ -197,7 +181,8 @@ def fetch_replies(
     *,
     start_page: int = 1,
     pages: int,
-) -> list[ReplyThread]:
+    refresh: bool = False,
+) -> ReplyBatch:
     """按 comment_id 钻取二级评论。每条主评论都取从第 start_page 页起的 pages 页，每页 20 条。
 
     内部串行，请求间隔由 HTTP 层统一控制。
@@ -205,6 +190,9 @@ def fetch_replies(
     中途触发风控或限流即停：已取完的照常返回，被打断的与没轮到的在 error 里说明原因。
     按页码取，结果可重放，留下已取完的没有副作用。一条都没取完才抛 RateLimitedError。
     二级评论接口本身不需要 WBI 签名，这里调 nav 只为拿登录态。
+
+    整次调用缓存，refresh 跳过缓存重取并覆盖。有任何一条出错（包括被打断）或全空时不缓存，
+    空结果可能是平台临时异常。
     """
     if start_page < 1:
         raise BilibiliError(f"start_page 需为正整数，收到 {start_page}")
@@ -213,6 +201,9 @@ def fetch_replies(
     bad = [cid for cid in comment_ids if not cid.isdigit()]
     if bad:
         raise BilibiliError(f"comment_ids 需为数字 id，收到 {'、'.join(bad)}")
+    key = ("replies", client.account, aid, tuple(comment_ids), start_page, pages)
+    if not refresh and (hit := _cached(key)) is not None:
+        return hit
     if not fetch_nav(client).is_login:
         raise AuthRequiredError("comment_replies")
     results: list[ReplyThread] = []
@@ -230,7 +221,10 @@ def fetch_replies(
                 for rest in comment_ids[i:]
             )
             break
-    return results
+    batch = ReplyBatch(results)
+    if all(t.error is None for t in results) and any(t.page.items for t in results):
+        result_cache.put(key, batch)
+    return batch
 
 
 def _check_cursor(cursor: str) -> None:
@@ -285,7 +279,7 @@ def fetch_comments(
     cursor: str | None = None,
     sort: str = "hot",
     batch_id: str | None = None,
-    session: str | None = None,
+    refresh: bool = False,
 ) -> Page[Comment]:
     """抓取视频主评论（纯主评论，不含二级评论）。置顶评论插入列表最前面。
 
@@ -296,13 +290,15 @@ def fetch_comments(
     同一账号对同一视频的多个热度序会话互相干扰：新开一个会话后，旧游标只返回已取过的内容，
     新旧游标混用时两者都会回退（10-07 实测）；平台也不校验 key，伪造的 key 照样返回数据。
     不同视频之间互不影响。
-    时间序的游标带位置，可重放，不受新会话影响；因此时间序的页走缓存。
-    热度序要重放只能靠调用方给的 batch_id：同一游标配同一 batch_id 时整批缓存，再取时原样返回。
-    batch_id 由模型自取，各对话常取同样的名字（如 a1），故按 MCP 会话隔离：
-    claude.ai 的连接器按对话给出会话 ID，同一对话续接也不变（10-08 实测）。
+    时间序的游标带位置，可重放，不受新会话影响。
 
-    中途触发风控时返回已取到的部分并标 rate_limited：热度序下这些页平台已记为取过，
-    丢掉它们，调用方用同一游标重试也取不回来。一页都没取到才抛 RateLimitedError。
+    整次调用缓存，键是除 jq 外的参数；热度序同一游标每次返回下一批，要重放只能靠 batch_id，
+    没给 batch_id 的热度序不缓存。refresh 跳过缓存重取并覆盖，只用于时间序。
+    batch_id 由模型自取，不同对话可能撞名而共用同一批，内容仍一致；不按会话隔离，
+    因为隔离也挡不住平台侧新开会话对旧游标的干扰。
+
+    中途触发风控时返回已取到的部分并标 rate_limited，不缓存：热度序下这些页平台已记为取过，
+    调用方没收到就再也取不回来。一页都没取到才抛 RateLimitedError。
 
     到底只认平台给的信号：标了 is_end、返回空页、或没有下一页游标。不按"这页不满 20 条"
     推断，那是错的：第一页有置顶评论时平台只给 19 条常规评论，中途页也出现过 19 条。
@@ -314,14 +310,16 @@ def fetch_comments(
         raise BilibiliError(f"未知的排序方式 {sort!r}，可选：{'、'.join(_SORT_MODE)}")
     if cursor:
         _check_cursor(cursor)
+    if refresh and sort == "hot":
+        raise BilibiliError("hot 不支持 refresh：换一个新的 batch_id 取下一批。")
     key = None
-    if sort == "hot" and batch_id:
-        key = ("hot", client.account, aid, session, cursor or "", batch_id)
-    if key is not None and (hit := page_cache.get(key)) is not None:
-        return replace(hit.value, cached_at=to_local_time(hit.fetched_at))
+    if sort == "newest" or batch_id:
+        key = ("main", client.account, aid, sort, cursor or "", count, batch_id)
+    if key is not None and not refresh and (hit := _cached(key)) is not None:
+        return hit
     page = _collect_main(client, aid, count=count, cursor=cursor, sort=sort)
-    if key is not None and page.items:
-        page_cache.put(key, page)
+    if key is not None and page.items and page.rate_limited is None:
+        result_cache.put(key, page)
     return page
 
 
@@ -339,16 +337,10 @@ def _collect_main(
     # 若改成先推进再抓，游标会停在已经取回的那页上，调用方续取时重复拿到同一批。
     offset: str | None = cursor or ""
     first_page = not cursor  # 置顶评论只在从头的第一页出现
-    fetched_at: int | None = None
 
     try:
         while offset is not None and len(comments) < want:
-            fetch = partial(_fetch_main_page, client, aid, nav.img_key, nav.sub_key, offset, mode)
-            if sort == "newest":
-                page, hit_at = _replayable(("main", client.account, aid, mode, offset), fetch)
-                fetched_at = _oldest(fetched_at, hit_at)
-            else:
-                page = fetch()
+            page = _fetch_main_page(client, aid, nav.img_key, nav.sub_key, offset, mode)
             if not page.replies:
                 offset = None
                 break
@@ -362,10 +354,7 @@ def _collect_main(
             raise RateLimitedError(e.describe("评论")) from None
         return Page(
             items=comments, has_more=True, next_cursor=offset,
-            rate_limited=e.describe_partial("评论"), cached_at=to_local_time(fetched_at),
+            rate_limited=e.describe_partial("评论", hot=sort == "hot"),
         )
 
-    return Page(
-        items=comments, has_more=offset is not None, next_cursor=offset,
-        cached_at=to_local_time(fetched_at),
-    )
+    return Page(items=comments, has_more=offset is not None, next_cursor=offset)

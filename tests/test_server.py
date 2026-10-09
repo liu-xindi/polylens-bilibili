@@ -23,6 +23,7 @@ from polylens_bilibili.models import (
     Page,
     QrLoginSession,
     QrStatus,
+    ReplyBatch,
     ReplyThread,
     SearchItem,
     SubtitleEntry,
@@ -188,7 +189,7 @@ def test_get_comment_replies_groups_by_thread() -> None:
         ReplyThread("1", Page(items=[_comment("11", "x")], has_more=True)),
         ReplyThread("2", Page(items=[], has_more=False)),
     ]
-    with _with_client(get_comment_replies=threads):
+    with _with_client(get_comment_replies=ReplyBatch(threads)):
         payload = _payload(
             "get_comment_replies", {"jq": ".", "url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
@@ -206,7 +207,7 @@ def test_get_comment_replies_surfaces_thread_error() -> None:
         ReplyThread("1", Page(items=[_comment("11", "x")])),
         ReplyThread("2", Page(items=[]), error="接口返回失败: 12006 没有该评论"),
     ]
-    with _with_client(get_comment_replies=threads):
+    with _with_client(get_comment_replies=ReplyBatch(threads)):
         payload = _payload(
             "get_comment_replies", {"jq": ".", "url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
@@ -219,7 +220,7 @@ def test_get_comment_replies_surfaces_withheld() -> None:
         ReplyThread("1", Page(items=[_comment("11", "x")], has_more=False), withheld=6, total=34),
         ReplyThread("2", Page(items=[], has_more=False)),
     ]
-    with _with_client(get_comment_replies=threads):
+    with _with_client(get_comment_replies=ReplyBatch(threads)):
         payload = _payload(
             "get_comment_replies", {"jq": ".", "url": BV_URL, "comment_ids": ["1", "2"], "pages": 1}
         )
@@ -493,7 +494,7 @@ def test_get_comment_replies_jq_runs_per_thread() -> None:
         ReplyThread("1", Page(items=[_comment("11", "x"), _comment("12", "y")])),
         ReplyThread("2", Page(items=[_comment("21", "z")])),
     ]
-    with _with_client(get_comment_replies=threads):
+    with _with_client(get_comment_replies=ReplyBatch(threads)):
         payload = _payload(
             "get_comment_replies",
             {"url": BV_URL, "comment_ids": ["1", "2"], "pages": 1, "jq": "[.[] | .content]"},
@@ -626,7 +627,7 @@ def test_hot_comments_require_batch_id() -> None:
 def test_get_comments_passes_sort_through() -> None:
     seen: dict[str, object] = {}
 
-    def _capture(video_id, *, count, cursor=None, sort="hot", batch_id=None, session=None):
+    def _capture(video_id, *, count, cursor=None, sort="hot", batch_id=None, refresh=False):
         seen.update(video_id=video_id, count=count, sort=sort)
         return Page(items=[])
 
@@ -635,33 +636,38 @@ def test_get_comments_passes_sort_through() -> None:
     assert seen["sort"] == "newest"
 
 
-def test_get_comments_passes_batch_id_and_mcp_session() -> None:
+def test_get_comments_passes_batch_id_and_refresh() -> None:
     seen: dict[str, object] = {}
 
     def _capture(video_id, **kwargs):
         seen.update(kwargs)
-        return Page(items=[])
+        return Page(items=[], from_cache=True, cached_at="2026-10-09 12:00")
 
-    with (
-        _with_client(get_comments=_capture),
-        patch.object(server_mod, "_mcp_session", lambda: "sess-1"),
-    ):
-        _payload("get_comments", {"jq": ".", "url": BV_URL, "count": 5, "batch_id": "b1"})
-    assert seen["batch_id"] == "b1" and seen["session"] == "sess-1"
+    with _with_client(get_comments=_capture):
+        payload = _payload(
+            "get_comments",
+            {"jq": ".", "url": BV_URL, "count": 5, "mode": "newest", "refresh": True},
+        )
+    assert seen["refresh"] is True and seen["batch_id"] is None
+    assert payload["from_cache"] is True and payload["cached_at"] == "2026-10-09 12:00"
 
 
-def test_mcp_session_reads_request_header() -> None:
-    from types import SimpleNamespace
+def test_get_comment_replies_reports_cache_once_per_call() -> None:
+    seen: dict[str, object] = {}
 
-    from mcp.server.lowlevel.server import request_ctx
+    def _capture(video_id, **kwargs):
+        seen.update(kwargs)
+        threads = [ReplyThread("1", Page(items=[_comment("11", "x")]))]
+        return ReplyBatch(threads, from_cache=True, cached_at="2026-10-09 12:00")
 
-    assert server_mod._mcp_session() is None
-    ctx = SimpleNamespace(request=SimpleNamespace(headers={"mcp-session-id": "abc"}))
-    token = request_ctx.set(ctx)  # type: ignore[arg-type]
-    try:
-        assert server_mod._mcp_session() == "abc"
-    finally:
-        request_ctx.reset(token)
+    with _with_client(get_comment_replies=_capture):
+        payload = _payload(
+            "get_comment_replies",
+            {"jq": ".", "url": BV_URL, "comment_ids": ["1"], "pages": 1, "refresh": True},
+        )
+    assert seen["refresh"] is True
+    assert payload["from_cache"] is True and payload["cached_at"] == "2026-10-09 12:00"
+    assert "cached_at" not in payload["results"][0]
 
 
 def test_get_video_info_reports_total_duration() -> None:

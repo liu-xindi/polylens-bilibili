@@ -76,18 +76,23 @@ class _RateLimited(Exception):
             return f"{what}被平台限流（429），可以重试。"
         return f"{what}触发风控（{self.signal}），可以重试。"
 
-    def describe_partial(self, what: str) -> str:
-        """中途被拦、已有部分结果时的说明。"""
+    def describe_partial(self, what: str, *, hot: bool = False) -> str:
+        """中途被拦、已有部分结果时的说明。部分结果不缓存，热度序的这批也就无法重放。"""
         if self.retry_in is not None:
+            head = f"评论接口触发风控（{self.signal}）"
+            when = f"约 {_minutes(self.retry_in)} 分钟后"
+        elif self.signal == _BLOCKING_SIGNAL:
+            head, when = f"{what}触发风控（{self.signal}）", "稍后"
+        elif self.signal == "429":
+            head, when = f"{what}被平台限流（429）", "可以"
+        else:
+            head, when = f"{what}触发风控（{self.signal}）", "可以"
+        if hot:
             return (
-                f"评论接口触发风控（{self.signal}），只取到部分，"
-                f"约 {_minutes(self.retry_in)} 分钟后用 next_cursor 续取。"
+                f"{head}，只取到部分，未缓存，这批无法重放。"
+                f"{when}用 next_cursor 续取；要完整重来，从 cursor 为空开始。"
             )
-        if self.signal == _BLOCKING_SIGNAL:
-            return f"{what}触发风控（{self.signal}），只取到部分，稍后用 next_cursor 续取。"
-        if self.signal == "429":
-            return f"{what}被平台限流（429），只取到部分，可以用 next_cursor 续取。"
-        return f"{what}触发风控（{self.signal}），只取到部分，可以用 next_cursor 续取。"
+        return f"{head}，只取到部分，未缓存。{when}用 next_cursor 续取。"
 
 
 def _minutes(seconds: float) -> int:
@@ -131,11 +136,6 @@ class _CommentGuard:
         if now < self._blocked_until or self._probing:
             raise _RateLimited(self._signal, "", retry_in=max(self._blocked_until - now, 0.0))
 
-    def check(self) -> None:
-        """熔断中则抛错。工具入口先查一遍，省掉取视频信息等前置请求。"""
-        with self._lock:
-            self._refuse(self._clock())
-
     def acquire(self) -> None:
         with self._lock:
             now = self._clock()
@@ -175,10 +175,6 @@ class _CommentGuard:
 
 
 _comment_guard = _CommentGuard()
-
-
-def check_comments_open() -> None:
-    _comment_guard.check()
 
 
 class HttpClient:

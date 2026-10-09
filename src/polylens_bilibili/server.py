@@ -20,7 +20,6 @@ from urllib.request import urlopen
 import segno
 from anyio import to_thread
 from mcp.server.fastmcp import FastMCP
-from mcp.server.lowlevel.server import request_ctx
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
@@ -103,6 +102,7 @@ class CommentsResult(_Timed):
     jq_count: int | None = None
     has_more: bool
     next_cursor: str | None = None
+    from_cache: bool = False
     cached_at: str | None = None
     message: str | None = None
 
@@ -114,13 +114,14 @@ class ReplyThreadItem(BaseModel):
     has_more: bool
     total: int | None = None
     withheld: int = 0
-    cached_at: str | None = None
     error: str | None = None
 
 
 class CommentRepliesResult(_Timed):
     video_id: str
     results: list[ReplyThreadItem]
+    from_cache: bool = False
+    cached_at: str | None = None
 
 
 class DanmakuResult(_Timed):
@@ -248,15 +249,6 @@ def _in_thread(fn: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-def _mcp_session() -> str | None:
-    """当前请求的 MCP 会话 ID。stdio 与内存会话没有 HTTP 请求，返回 None。"""
-    try:
-        request = request_ctx.get().request
-    except LookupError:
-        return None
-    return request.headers.get("mcp-session-id") if request is not None else None
-
-
 def _attach_elapsed(result: Any, elapsed_s: float) -> Any:
     """模型返回直接设字段；内容块列表写进末尾的 JSON 元信息块。"""
     if isinstance(result, BaseModel):
@@ -374,7 +366,7 @@ def create_server(
             int,
             Field(
                 description=(
-                    "至少取多少条主评论。平台按每页约 20 条整页返回，实际条数约为 20 的整数倍；"
+                    "至少取多少条主评论。平台按每页约 20 条整页返回，实际条数可能多于 count；"
                     "评论不够时返回剩余的全部。"
                     "主评论与二级评论合计限速每分钟约 30 页（约 600 条）。"
                 )
@@ -392,9 +384,10 @@ def create_server(
                     "新开会话后，旧 cursor 只会返回已取过的内容，新旧混用时两者都会回退。"
                     "newest 按时间倒序，cursor 含位置，可重复取同一批，不受新会话影响。"
                     "需要完整抓取或断点续取时用 newest。"
-                    "缓存：newest 按页缓存 30 分钟，与 count、jq 无关，命中不续期，最多 1000 页；"
-                    "hot 按 batch_id 缓存整批，见 batch_id。"
-                    "调用没收到结果时服务端仍会取完，之后再取直接用缓存。"
+                    "缓存：除 jq 外参数相同的调用返回同一结果，from_cache 表示是否来自缓存；"
+                    "被限速的不完整结果不缓存。"
+                    "newest 要新数据用 refresh，hot 换 batch_id 取下一批。"
+                    "调用没收到结果时服务端仍会取完，之后用相同参数再取直接用缓存。"
                 )
             ),
         ] = "hot",
@@ -402,11 +395,15 @@ def create_server(
             str | None,
             Field(
                 description=(
-                    "mode=hot 时必填。自定的短字符串：同一 cursor 配同一个值返回同一批"
-                    "（与 count、jq 无关，缓存 30 分钟），换新值才取下一批。"
+                    "mode=hot 时必填。自定的短字符串：其他参数相同时，同一个值返回同一批，"
+                    "换新值取下一批。"
+                    "重放时 from_cache 为 false，说明原批次已不在缓存，拿到的是下一批。"
                 )
             ),
         ] = None,
+        refresh: Annotated[
+            bool, Field(description="跳过缓存重新取，并更新缓存。仅用于 newest。")
+        ] = False,
         *,
         jq: Annotated[str, Field(description=_jq_desc(Comment, paged=True))],
     ) -> CommentsResult:
@@ -420,8 +417,7 @@ def create_server(
             raise BilibiliError("mode=hot 需要 batch_id：传一个自定的短字符串，重放同一批时沿用。")
         video_id, _ = _resolve(url)
         page = _client().get_comments(
-            video_id, count=count, cursor=cursor, sort=mode, batch_id=batch_id,
-            session=_mcp_session(),
+            video_id, count=count, cursor=cursor, sort=mode, batch_id=batch_id, refresh=refresh
         )
         comments, jq_count = encode_items("comments", page.items, Comment, jq)
         return CommentsResult(
@@ -431,6 +427,7 @@ def create_server(
             jq_count=jq_count,
             has_more=page.has_more,
             next_cursor=page.next_cursor,
+            from_cache=page.from_cache,
             cached_at=page.cached_at,
             message=page.rate_limited,
         )
@@ -456,6 +453,7 @@ def create_server(
             int,
             Field(description="每条主评论从第几页开始，1 起。"),
         ] = 1,
+        refresh: Annotated[bool, Field(description="跳过缓存重新取，并更新缓存。")] = False,
         *,
         jq: Annotated[
             str,
@@ -474,18 +472,19 @@ def create_server(
         中途被风控或限流时，已取完的照常返回，其余的 error 里说明原因。
         parent_id 为空表示直接回复主评论，否则是所回复的那条二级评论的 id。
         parent_id 指向的二级评论不在列表里时，那条被平台隐藏了，取不到。
-        按页缓存 30 分钟，与 pages 无关，命中不续期。
-        调用没收到结果时服务端仍会取完，之后再取直接用缓存。
+        除 jq 外参数相同的调用返回同一结果，from_cache 表示是否来自缓存；
+        被限速的不完整结果不缓存，要新数据用 refresh。
+        调用没收到结果时服务端仍会取完，之后用相同参数再取直接用缓存。
         image_urls、link_titles 是字符串，多个时以换行分隔。
 
         (comment replies, sub-replies, thread)
         """
         video_id, _ = _resolve(url)
-        threads = _client().get_comment_replies(
-            video_id, comment_ids=comment_ids, start_page=start_page, pages=pages
+        batch = _client().get_comment_replies(
+            video_id, comment_ids=comment_ids, start_page=start_page, pages=pages, refresh=refresh
         )
         results = []
-        for t in threads:
+        for t in batch.threads:
             replies, jq_count = encode_items(
                 "replies", t.page.items, Comment, jq, exclude=_REPLY_EXCLUDE
             )
@@ -497,11 +496,13 @@ def create_server(
                     has_more=t.page.has_more,
                     total=t.total,
                     withheld=t.withheld,
-                    cached_at=t.page.cached_at,
                     error=t.error,
                 )
             )
-        return CommentRepliesResult(video_id=video_id, results=results)
+        return CommentRepliesResult(
+            video_id=video_id, results=results,
+            from_cache=batch.from_cache, cached_at=batch.cached_at,
+        )
 
     @tool(annotations=_READS_PLATFORM)
     @_timed

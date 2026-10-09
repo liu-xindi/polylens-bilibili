@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from polylens_bilibili.api import _comments, _http, _page_cache
+from polylens_bilibili.api import _comments, _http, _result_cache
 
 
 @pytest.fixture(autouse=True)
@@ -14,8 +14,8 @@ def comment_guard(monkeypatch: pytest.MonkeyPatch) -> _http._CommentGuard:
 
 
 @pytest.fixture(autouse=True)
-def page_cache(monkeypatch: pytest.MonkeyPatch) -> _page_cache.PageCache:
-    """评论页缓存也是进程级状态：每个用例换一份空的。"""
-    cache = _page_cache.PageCache()
-    monkeypatch.setattr(_comments, "page_cache", cache)
+def result_cache(monkeypatch: pytest.MonkeyPatch) -> _result_cache.ResultCache:
+    """评论结果缓存也是进程级状态：每个用例换一份空的。"""
+    cache = _result_cache.ResultCache()
+    monkeypatch.setattr(_comments, "result_cache", cache)
     return cache

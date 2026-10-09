@@ -215,7 +215,10 @@ def test_fetch_comments_rate_limited_midway_returns_partial():
     with _nav_patch("_comments"), _SIGN_PATCH:
         page = fetch_comments(client, aid=100, count=40)
     assert [c.content for c in page.items] == ["a"]
-    assert page.rate_limited == "评论触发风控（-352），只取到部分，可以用 next_cursor 续取。"
+    assert page.rate_limited == (
+        "评论触发风控（-352），只取到部分，未缓存，这批无法重放。"
+        "可以用 next_cursor 续取；要完整重来，从 cursor 为空开始。"
+    )
     assert page.has_more is True and page.next_cursor == "SESSION"
 
 
@@ -243,7 +246,7 @@ def test_fetch_replies_marks_up_from_upper():
         "replies": [_reply(1, "up", mid=42), _reply(2, "fan")], "upper": {"mid": 42},
     }
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], pages=1)
+        out = fetch_replies(client, 100, ["555"], pages=1).threads
     assert [c.is_up for c in out[0].page.items] == [True, False]
 
 
@@ -257,7 +260,7 @@ def test_fetch_replies_reads_requested_pages():
     client = MagicMock()
     client.get_json.side_effect = _get_json
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], start_page=2, pages=3)
+        out = fetch_replies(client, 100, ["555"], start_page=2, pages=3).threads
     t = out[0]
     assert t.comment_id == "555"
     assert seen_pn == [2, 3, 4]
@@ -276,7 +279,7 @@ def test_fetch_replies_stops_at_short_page():
     client = MagicMock()
     client.get_json.side_effect = _get_json
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], pages=10)
+        out = fetch_replies(client, 100, ["555"], pages=10).threads
     t = out[0]
     assert seen_pn == [1, 2, 3]
     assert len(t.page.items) == 45 and t.total == 45
@@ -289,7 +292,7 @@ def test_fetch_replies_full_last_page_ends_by_total():
     client = MagicMock()
     client.get_json.side_effect = _make_sized_sub_page({555: 40})
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], pages=2)
+        out = fetch_replies(client, 100, ["555"], pages=2).threads
     assert len(out[0].page.items) == 40 and out[0].page.has_more is False
 
 
@@ -297,7 +300,7 @@ def test_fetch_replies_page_beyond_end_is_empty():
     client = MagicMock()
     client.get_json.side_effect = _make_sized_sub_page({555: 30})
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], start_page=5, pages=1)
+        out = fetch_replies(client, 100, ["555"], start_page=5, pages=1).threads
     assert out[0].page.items == [] and out[0].page.has_more is False and out[0].total == 30
 
 
@@ -322,7 +325,7 @@ def test_fetch_replies_pages_apply_per_thread():
     client = MagicMock()
     client.get_json.side_effect = _make_sized_sub_page({1: 50, 2: 30, 3: 3})
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["1", "2", "3"], pages=2)
+        out = fetch_replies(client, 100, ["1", "2", "3"], pages=2).threads
     by_id = {t.comment_id: t for t in out}
     assert [len(by_id[c].page.items) for c in ("1", "2", "3")] == [40, 30, 3]
     assert by_id["1"].page.has_more
@@ -341,7 +344,7 @@ def test_fetch_replies_reports_withheld_count():
         "page": {"num": 1, "size": 20, "count": 10},
     }
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], pages=1)
+        out = fetch_replies(client, 100, ["555"], pages=1).threads
     assert out[0].withheld == 1
 
 
@@ -359,7 +362,7 @@ def test_fetch_replies_withheld_degrades_to_zero(shape: dict):
     client = MagicMock()
     client.get_json.return_value = {"replies": [_reply(1, "r")], **shape}
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], pages=1)
+        out = fetch_replies(client, 100, ["555"], pages=1).threads
     assert out[0].withheld == 0
 
 
@@ -394,7 +397,7 @@ def test_fetch_replies_rejects_comment_of_another_video():
     client = MagicMock()
     client.get_json.return_value = {"replies": [_reply(1, "r")], "root": {"oid": 999}}
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555"], pages=1)
+        out = fetch_replies(client, 100, ["555"], pages=1).threads
     assert out[0].page.items == []
     assert out[0].error is not None and "不属于这个视频" in out[0].error
 
@@ -408,7 +411,7 @@ def test_fetch_replies_isolates_failing_thread():
     client = MagicMock()
     client.get_json.side_effect = _get
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["555", "1"], pages=1)
+        out = fetch_replies(client, 100, ["555", "1"], pages=1).threads
     assert [t.comment_id for t in out] == ["555", "1"]
     assert [c.content for c in out[0].page.items] == ["ok"] and out[0].error is None
     assert out[1].page.items == [] and out[1].error is not None and "12006" in out[1].error
@@ -430,7 +433,7 @@ def test_fetch_replies_interrupted_keeps_finished_threads():
         _RateLimited("429", "/x"),
     ]
     with _nav_patch("_comments"):
-        out = fetch_replies(client, 100, ["1", "2", "3"], pages=1)
+        out = fetch_replies(client, 100, ["1", "2", "3"], pages=1).threads
     assert [t.comment_id for t in out] == ["1", "2", "3"]
     assert [c.content for c in out[0].page.items] == ["a"] and out[0].error is None
     assert out[1].error == out[2].error == "二级评论抓取被平台限流（429），可以重试。"
@@ -1112,13 +1115,14 @@ def test_partial_comments_carry_cooldown(clock: _Clock):
     with _nav_patch("_comments"), _SIGN_PATCH, _answer(client, first, _BLOCKED):
         page = fetch_comments(client, aid=100, count=40)
     assert page.rate_limited == (
-        "评论接口触发风控（412），只取到部分，约 15 分钟后用 next_cursor 续取。"
+        "评论接口触发风控（412），只取到部分，未缓存，这批无法重放。"
+        "约 15 分钟后用 next_cursor 续取；要完整重来，从 cursor 为空开始。"
     )
     with pytest.raises(_RateLimited):
         client.get_json(_MAIN)
 
 
-# ── 评论页缓存 ──────────────────────────────────────────────────────────────
+# ── 评论结果缓存 ────────────────────────────────────────────────────────────
 
 
 class _Platform:
@@ -1145,36 +1149,42 @@ def _cached_client(platform: _Platform, account: str = "a") -> MagicMock:
     return client
 
 
-def test_newest_pages_replayed_from_cache():
+def test_newest_same_params_replayed_from_cache():
     platform = _Platform()
     client = _cached_client(platform)
     with _nav_patch("_comments"), _SIGN_PATCH:
-        first = fetch_comments(client, aid=100, count=600, sort="newest")
-        assert len(platform.calls) == 30 and first.cached_at is None
-        again = fetch_comments(client, aid=100, count=400, sort="newest")
-    assert len(platform.calls) == 30
-    assert again.items == first.items[:400]
-    assert again.next_cursor == "offset20"
-    assert again.cached_at is not None
+        first = fetch_comments(client, aid=100, count=40, sort="newest")
+        again = fetch_comments(client, aid=100, count=40, sort="newest")
+    assert len(platform.calls) == 2
+    assert again.items == first.items and again.next_cursor == first.next_cursor
+    assert (first.from_cache, first.cached_at) == (False, None)
+    assert again.from_cache is True and again.cached_at is not None
 
 
-def test_newest_fetches_only_pages_not_cached():
+def test_newest_different_count_is_fetched_whole():
+    """整次调用缓存：参数不同就整批重取，不与缓存里的页拼接。"""
     platform = _Platform()
     client = _cached_client(platform)
     with _nav_patch("_comments"), _SIGN_PATCH:
-        fetch_comments(client, aid=100, count=400, sort="newest")
-        page = fetch_comments(client, aid=100, count=600, sort="newest")
-    assert [c[2] for c in platform.calls[20:]] == [f"offset{i}" for i in range(20, 30)]
-    assert len(page.items) == 600
+        fetch_comments(client, aid=100, count=40, sort="newest")
+        page = fetch_comments(client, aid=100, count=60, sort="newest")
+    assert len(platform.calls) == 5 and page.from_cache is False
 
 
-def test_hot_never_cached():
-    platform = _Platform(pages=1)
+def test_newest_refresh_refetches_and_overwrites():
+    platform = _Platform()
     client = _cached_client(platform)
     with _nav_patch("_comments"), _SIGN_PATCH:
-        fetch_comments(client, aid=100, count=20, sort="hot")
-        page = fetch_comments(client, aid=100, count=20, sort="hot")
-    assert len(platform.calls) == 2 and page.cached_at is None
+        fetch_comments(client, aid=100, count=20, sort="newest")
+        fresh = fetch_comments(client, aid=100, count=20, sort="newest", refresh=True)
+        again = fetch_comments(client, aid=100, count=20, sort="newest")
+    assert len(platform.calls) == 2
+    assert fresh.from_cache is False and again.from_cache is True
+
+
+def test_hot_rejects_refresh():
+    with pytest.raises(BilibiliError, match="batch_id"):
+        fetch_comments(MagicMock(), aid=100, count=20, batch_id="b1", refresh=True)
 
 
 def test_cache_not_shared_across_accounts():
@@ -1185,7 +1195,7 @@ def test_cache_not_shared_across_accounts():
     assert len(platform.calls) == 2
 
 
-def test_empty_page_not_cached():
+def test_empty_result_not_cached():
     client = MagicMock()
     client.get_json.return_value = _page([])
     with _nav_patch("_comments"), _SIGN_PATCH:
@@ -1194,27 +1204,55 @@ def test_empty_page_not_cached():
     assert client.get_json.call_count == 2
 
 
-def test_replies_replayed_from_cache():
+def test_partial_newest_not_cached():
+    client = MagicMock()
+    client.get_json.side_effect = [
+        _page([_reply(1, "a")], is_end=False, next_offset="offset1"),
+        _RateLimited("-352", "/x"),
+        _page([_reply(1, "a")], is_end=False, next_offset="offset1"),
+        _page([_reply(2, "b")], is_end=True),
+    ]
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        first = fetch_comments(client, aid=100, count=40, sort="newest")
+        again = fetch_comments(client, aid=100, count=40, sort="newest")
+    assert first.rate_limited == (
+        "评论触发风控（-352），只取到部分，未缓存。可以用 next_cursor 续取。"
+    )
+    assert again.from_cache is False and [c.content for c in again.items] == ["a", "b"]
+
+
+def test_replies_same_params_replayed_from_cache():
     platform = _Platform()
     client = _cached_client(platform)
     with _nav_patch("_comments"):
-        first = fetch_replies(client, 100, ["555"], pages=3)
-        again = fetch_replies(client, 100, ["555"], start_page=2, pages=2)
-    assert platform.calls == [("sub", 555, 1), ("sub", 555, 2), ("sub", 555, 3)]
-    assert again[0].page.items == first[0].page.items[20:]
-    assert first[0].page.cached_at is None and again[0].page.cached_at is not None
+        first = fetch_replies(client, 100, ["555"], pages=2)
+        again = fetch_replies(client, 100, ["555"], pages=2)
+        other = fetch_replies(client, 100, ["555"], start_page=2, pages=1)
+    assert platform.calls == [("sub", 555, 1), ("sub", 555, 2), ("sub", 555, 2)]
+    assert again.threads[0].page.items == first.threads[0].page.items
+    assert (first.from_cache, again.from_cache, other.from_cache) == (False, True, False)
+    assert again.cached_at is not None
 
 
-def test_reply_of_another_video_not_cached():
+def test_replies_refresh_refetches():
+    platform = _Platform()
+    client = _cached_client(platform)
+    with _nav_patch("_comments"):
+        fetch_replies(client, 100, ["555"], pages=1)
+        fresh = fetch_replies(client, 100, ["555"], pages=1, refresh=True)
+    assert len(platform.calls) == 2 and fresh.from_cache is False
+
+
+def test_replies_with_any_error_not_cached():
     client = MagicMock()
     client.get_json.return_value = {"root": {"oid": 999}, "replies": [_reply(1, "x")]}
     with _nav_patch("_comments"):
         fetch_replies(client, 100, ["555"], pages=1)
         out = fetch_replies(client, 100, ["555"], pages=1)
-    assert client.get_json.call_count == 2 and out[0].error
+    assert client.get_json.call_count == 2 and out.threads[0].error
 
 
-def test_cached_pages_served_while_breaker_open(comment_guard: Any):
+def test_cached_result_served_while_breaker_open(comment_guard: Any):
     platform = _Platform(pages=1)
     client = _http()
     with _nav_patch("_comments"), _SIGN_PATCH, patch.object(
@@ -1225,7 +1263,7 @@ def test_cached_pages_served_while_breaker_open(comment_guard: Any):
         page = fetch_comments(client, aid=100, count=20, sort="newest")
         with pytest.raises(RateLimitedError):
             fetch_comments(client, aid=200, count=20, sort="newest")
-    assert len(page.items) == 20 and len(platform.calls) == 1
+    assert page.from_cache is True and len(platform.calls) == 1
 
 
 # ── 热度序按 batch_id 重放 ──────────────────────────────────────────────────
@@ -1248,7 +1286,7 @@ def test_hot_same_batch_id_replays_without_requests():
         again = fetch_comments(client, aid=100, count=1, batch_id="b1")
     assert client.get_json.call_count == 1
     assert [c.content for c in again.items] == [c.content for c in first.items] == ["a"]
-    assert first.cached_at is None and again.cached_at is not None
+    assert first.from_cache is False and again.from_cache is True
 
 
 def test_hot_new_batch_id_takes_next_batch():
@@ -1260,6 +1298,14 @@ def test_hot_new_batch_id_takes_next_batch():
     assert [c.content for c in second.items] == ["b"]
 
 
+def test_hot_different_count_takes_next_batch():
+    client = _hot_pages("a", "b", "c")
+    with _nav_patch("_comments"), _SIGN_PATCH:
+        fetch_comments(client, aid=100, count=1, batch_id="b1")
+        second = fetch_comments(client, aid=100, count=2, batch_id="b1")
+    assert second.from_cache is False and [c.content for c in second.items] == ["b", "c"]
+
+
 def test_hot_without_batch_id_is_not_cached():
     client = _hot_pages("a", "b")
     with _nav_patch("_comments"), _SIGN_PATCH:
@@ -1268,19 +1314,19 @@ def test_hot_without_batch_id_is_not_cached():
     assert [c.content for c in second.items] == ["b"]
 
 
-def test_hot_partial_batch_is_replayed_as_is():
-    """风控前取到的部分平台已记为取过，重放时原样给回，连同风控说明。"""
+def test_hot_partial_batch_not_cached():
     client = MagicMock()
     client.get_json.side_effect = [
         _page([_reply(1, "a")], is_end=False, next_offset="SESSION"),
         _RateLimited("-352", "/x"),
+        _page([_reply(2, "b")], is_end=False, next_offset="SESSION"),
+        _page([_reply(3, "c")], is_end=True),
     ]
     with _nav_patch("_comments"), _SIGN_PATCH:
         first = fetch_comments(client, aid=100, count=40, batch_id="b1")
         again = fetch_comments(client, aid=100, count=40, batch_id="b1")
-    assert client.get_json.call_count == 2
-    assert [c.content for c in again.items] == ["a"]
-    assert again.rate_limited == first.rate_limited is not None
+    assert first.rate_limited is not None and "无法重放" in first.rate_limited
+    assert again.from_cache is False and [c.content for c in again.items] == ["b", "c"]
 
 
 def test_hot_failed_batch_is_not_cached():
@@ -1294,16 +1340,3 @@ def test_hot_failed_batch_is_not_cached():
             fetch_comments(client, aid=100, count=1, batch_id="b1")
         retry = fetch_comments(client, aid=100, count=1, batch_id="b1")
     assert [c.content for c in retry.items] == ["a"]
-
-
-def test_hot_batch_is_scoped_to_mcp_session():
-    """batch_id 由模型自取，各对话常取同名（如 a1）：不同会话互不命中。"""
-    client = _hot_pages("a", "b", "c")
-    with _nav_patch("_comments"), _SIGN_PATCH:
-        one = fetch_comments(client, aid=100, count=1, batch_id="a1", session="s1")
-        other = fetch_comments(client, aid=100, count=1, batch_id="a1", session="s2")
-        again = fetch_comments(client, aid=100, count=1, batch_id="a1", session="s1")
-    assert [c.content for c in one.items] == ["a"]
-    assert [c.content for c in other.items] == ["b"]
-    assert [c.content for c in again.items] == ["a"]
-    assert client.get_json.call_count == 2
