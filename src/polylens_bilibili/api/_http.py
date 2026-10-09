@@ -147,17 +147,23 @@ class _Guard:
             )
 
     def acquire(self) -> None:
+        """预订下一个发出时刻，在锁外等到点：持锁睡会挡住在途请求的 reached/failed。"""
         with self._lock:
             now = self._clock()
             self._refuse(now)
-            if self._blocked_until:
+            probing = bool(self._blocked_until)
+            if probing:
                 self._probing = True
                 _log.warning("%s熔断到期，放行一个请求试探", self.scope)
+            start = now
             if self._last_start is not None:
-                wait = self._last_start + self._interval - now
-                if wait > 0:
-                    self._sleep(wait)
-            self._last_start = self._clock()
+                start = max(now, self._last_start + self._interval)
+            self._last_start = start
+        if start > now:
+            self._sleep(start - now)
+        if not probing:
+            with self._lock:
+                self._refuse(self._clock())  # 等待期间可能已熔断
 
     def reached(self) -> None:
         """平台正常作答（含业务错误码），说明没被拦。"""

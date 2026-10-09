@@ -1124,6 +1124,43 @@ def test_danmaku_requests_spaced_apart(clock: _Clock):
     assert clock.slept == [5.0]
 
 
+def test_waiting_request_does_not_hold_up_one_in_flight():
+    """排队的请求在锁外等：先发出的请求作答后不必陪它睡完。"""
+    import threading
+    import time
+
+    from polylens_bilibili.api._http import _Guard
+
+    guard = _Guard("弹幕接口", 0.5)
+    guard.acquire()
+    queued = threading.Thread(target=guard.acquire)
+    queued.start()
+    time.sleep(0.05)
+    t0 = time.monotonic()
+    guard.reached()
+    assert time.monotonic() - t0 < 0.1
+    queued.join()
+
+
+def test_breaker_opened_while_waiting_refuses_queued_request(clock: _Clock):
+    from polylens_bilibili.api import _http as http_module
+
+    client = _http()
+    guard = http_module._guards["danmaku"]
+    with _answer(client, b""):
+        client.get_api_bytes(_DM, {"oid": 1})
+    real_sleep = clock.sleep
+
+    def sleep_then_block(seconds: float) -> None:
+        real_sleep(seconds)
+        guard.failed("412")
+
+    guard._sleep = sleep_then_block
+    with _answer(client) as sent, pytest.raises(_RateLimited):
+        client.get_api_bytes(_DM, {"oid": 2})
+    assert sent.call_count == 0
+
+
 def test_danmaku_block_opens_its_own_breaker(clock: _Clock):
     client = _http()
     with _answer(client, _BLOCKED, _OK) as sent:
