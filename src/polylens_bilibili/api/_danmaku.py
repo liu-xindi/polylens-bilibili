@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from ..errors import BilibiliError
+from ..errors import BilibiliError, RateLimitedError
 from ..models import Danmaku
-from ._constants import DANMAKU_XML_URL
-from ._http import HttpClient, inflate_deflate
+from ._constants import ENDPOINTS
+from ._http import HttpClient, _RateLimited, inflate_deflate
 
 
 def fetch_danmaku_xml(client: HttpClient, cid: int) -> str:
     """抓取并解压某 cid 的弹幕 XML。"""
-    return inflate_deflate(client.get_bytes(f"{DANMAKU_XML_URL}?oid={cid}"))
+    try:
+        raw = client.get_api_bytes(ENDPOINTS["danmaku_xml"], {"oid": cid})
+    except _RateLimited as e:
+        raise RateLimitedError(e.describe("取弹幕")) from None
+    return inflate_deflate(raw)
 
 
 def parse_danmaku_xml(xml: str) -> list[Danmaku]:

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 API_BASE = "https://api.bilibili.com"
 PASSPORT_BASE = "https://passport.bilibili.com"
-DANMAKU_XML_URL = "https://api.bilibili.com/x/v1/dm/list.so"
 WEB_HOME = "https://www.bilibili.com/"
 SEARCH_REFERER = "https://search.bilibili.com/"
 
@@ -25,6 +24,7 @@ ENDPOINTS: dict[str, str] = {
     "space_videos": "/x/space/wbi/arc/search",
     "up_card": "/x/web-interface/card",
     "feed_rcmd": "/x/web-interface/wbi/index/top/feed/rcmd",
+    "danmaku_xml": "/x/v1/dm/list.so",
 }
 
 # 搜索最多翻到第几页。平台结果封顶 1000 条（34 页），再往后的页码会被夹回最后一页。

@@ -507,7 +507,7 @@ _DANMAKU_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 def test_fetch_danmaku_delegates_to_parse():
     client = MagicMock()
-    client.get_bytes.return_value = _DANMAKU_XML.encode()
+    client.get_api_bytes.return_value = _DANMAKU_XML.encode()
     bullets = fetch_danmaku(client, cid=12345)
     assert len(bullets) == 2
     assert bullets[0].timestamp == 1.0  # 已排序
@@ -515,9 +515,9 @@ def test_fetch_danmaku_delegates_to_parse():
 
 def test_fetch_danmaku_url_includes_cid():
     client = MagicMock()
-    client.get_bytes.return_value = b"<i></i>"
+    client.get_api_bytes.return_value = b"<i></i>"
     fetch_danmaku(client, cid=9999)
-    assert "oid=9999" in client.get_bytes.call_args[0][0]
+    assert client.get_api_bytes.call_args[0] == ("/x/v1/dm/list.so", {"oid": 9999})
 
 
 # ── 弹幕取样 ────────────────────────────────────────────────────────────────
@@ -980,7 +980,10 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     from polylens_bilibili.api import _http
 
     c = _Clock()
-    monkeypatch.setattr(_http, "_comment_guard", _http._CommentGuard(clock=c, sleep=c.sleep))
+    fresh = _http._new_guards()
+    for guard in fresh.values():
+        guard._clock, guard._sleep = c, c.sleep
+    monkeypatch.setattr(_http, "_guards", fresh)
     return c
 
 
@@ -997,7 +1000,7 @@ def test_comment_requests_spaced_by_start_time(clock: _Clock):
         client.get_json(_SUB)  # 主评论与二级评论共用一份间隔
         clock.now += 2.0
         client.get_json(_MAIN)
-    assert clock.slept == [0.7]
+    assert clock.slept == [1.7]
 
 
 def test_other_endpoints_not_throttled(clock: _Clock):
@@ -1098,13 +1101,38 @@ def test_only_412_opens_breaker(clock: _Clock, answer: Any):
         client.get_json(_SUB)
 
 
-def test_comment_requests_capped_per_minute(clock: _Clock):
-    """任意 60 秒内最多 30 页：每分钟 60 页时第 52 页被拦，40 页连续 10 分钟未触发。"""
+def test_comment_requests_spread_evenly(clock: _Clock):
+    """连续取页均匀摊开，不攒成一阵突发再整段等待。"""
     client = _http()
     with _answer(client, *[_OK] * 31):
         for _ in range(31):
             client.get_json(_MAIN)
-    assert clock.slept == [1.0] * 29 + [31.0]
+    assert clock.slept == [2.0] * 30
+
+
+_DM = "/x/v1/dm/list.so"
+
+
+def test_danmaku_requests_spaced_apart(clock: _Clock):
+    """弹幕每 6 秒一次：每 3 秒一次时第 15 次被拦（10-09 实测），与评论各算各的。"""
+    client = _http()
+    with _answer(client, b"", _OK, b""):
+        client.get_api_bytes(_DM, {"oid": 1})
+        client.get_json(_MAIN)
+        clock.now += 1.0
+        client.get_api_bytes(_DM, {"oid": 2})
+    assert clock.slept == [5.0]
+
+
+def test_danmaku_block_opens_its_own_breaker(clock: _Clock):
+    client = _http()
+    with _answer(client, _BLOCKED, _OK) as sent:
+        with pytest.raises(RateLimitedError, match="弹幕接口触发风控（412），约 15 分钟后再试"):
+            fetch_danmaku(client, cid=1)
+        with pytest.raises(RateLimitedError, match="弹幕接口"):
+            fetch_danmaku(client, cid=2)
+        client.get_json(_MAIN)
+    assert sent.call_count == 2
 
 
 def test_partial_comments_carry_cooldown(clock: _Clock):
@@ -1252,14 +1280,14 @@ def test_replies_with_any_error_not_cached():
     assert client.get_json.call_count == 2 and out.threads[0].error
 
 
-def test_cached_result_served_while_breaker_open(comment_guard: Any):
+def test_cached_result_served_while_breaker_open(guards: Any):
     platform = _Platform(pages=1)
     client = _http()
     with _nav_patch("_comments"), _SIGN_PATCH, patch.object(
         client, "_get_json", side_effect=lambda path, params, *_: platform(path, params)
     ):
         fetch_comments(client, aid=100, count=20, sort="newest")
-        comment_guard.failed("412")
+        guards["comments"].failed("412")
         page = fetch_comments(client, aid=100, count=20, sort="newest")
         with pytest.raises(RateLimitedError):
             fetch_comments(client, aid=200, count=20, sort="newest")

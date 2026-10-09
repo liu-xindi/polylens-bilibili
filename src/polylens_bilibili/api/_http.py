@@ -26,11 +26,16 @@ _log = logging.getLogger("polylens_bilibili")
 # 主评论与二级评论被风控时同进同退（实测主评论被拦时换排序、换视频都不通；二级评论未单独验证，
 # 按同一套算）。其余接口互不牵连：评论被拦期间搜索、字幕、视频信息照常可用。
 _COMMENT_PATHS = frozenset({ENDPOINTS["replies_main"], ENDPOINTS["replies_sub"]})
+_DANMAKU_PATH = ENDPOINTS["danmaku_xml"]
 _RECENT_KEPT = 30
 
 
 def _group(path: str) -> str:
-    return "comments" if path in _COMMENT_PATHS else path
+    if path in _COMMENT_PATHS:
+        return "comments"
+    if path == _DANMAKU_PATH:
+        return "danmaku"
+    return path
 
 
 # 各组最近若干次请求的发出时刻，进程内共享。只为风控日志：被拦时记下此前的请求密度，
@@ -55,10 +60,13 @@ class _RateLimited(Exception):
     都按可以重试报。
     """
 
-    def __init__(self, signal: str, path: str, retry_in: float | None = None) -> None:
+    def __init__(
+        self, signal: str, path: str, retry_in: float | None = None, scope: str = ""
+    ) -> None:
         self.signal = signal
         self.path = path
-        self.retry_in = retry_in  # 评论组熔断时距恢复的秒数，其余为 None
+        self.retry_in = retry_in  # 节流组熔断时距恢复的秒数，其余为 None
+        self.scope = scope  # 熔断的是哪组接口，随 retry_in 一起设
         super().__init__(signal)
 
     def __str__(self) -> str:
@@ -67,7 +75,7 @@ class _RateLimited(Exception):
     def describe(self, what: str) -> str:
         if self.retry_in is not None:
             return (
-                f"评论接口触发风控（{self.signal}），约 {_minutes(self.retry_in)} 分钟后再试，"
+                f"{self.scope}触发风控（{self.signal}），约 {_minutes(self.retry_in)} 分钟后再试，"
                 "期间重试或重新登录都无效。"
             )
         if self.signal == _BLOCKING_SIGNAL:
@@ -79,7 +87,7 @@ class _RateLimited(Exception):
     def describe_partial(self, what: str, *, hot: bool = False) -> str:
         """中途被拦、已有部分结果时的说明。部分结果不缓存，热度序的这批也就无法重放。"""
         if self.retry_in is not None:
-            head = f"评论接口触发风控（{self.signal}）"
+            head = f"{self.scope}触发风控（{self.signal}）"
             when = f"约 {_minutes(self.retry_in)} 分钟后"
         elif self.signal == _BLOCKING_SIGNAL:
             head, when = f"{what}触发风控（{self.signal}）", "稍后"
@@ -100,41 +108,43 @@ def _minutes(seconds: float) -> int:
 
 
 _BLOCKING_SIGNAL = "412"
-_COMMENT_INTERVAL = 1.0
-_PAGES_PER_MINUTE = 30
 _COOLDOWN = 900.0
 _RECHECK = 120.0
 
 
-class _CommentGuard:
-    """评论组的节流与熔断，进程内共享：http 部署下所有会话共用一份。
+class _Guard:
+    """一组接口的节流与熔断，进程内共享：http 部署下所有会话共用一份。
 
-    节流：相邻两次评论请求的发出时刻至少隔 _COMMENT_INTERVAL 秒，且任意 60 秒内不超过
-    _PAGES_PER_MINUTE 次，跨调用、跨会话都算。10-07 实测：每分钟 60 页在第 52 页被拦，
-    每分钟 20 页连续 10 分钟、每分钟 40 页连续 10 分钟都没触发。取 30，在测过的 40 下留余量。
+    节流：相邻两次请求的发出时刻至少隔 interval 秒，跨调用、跨会话都算。均匀摊开而不是只限
+    每分钟总数：平台窗口长度没测准，攒成一阵突发的形态也没测过。
 
-    熔断：评论组收到 412 即停用 _COOLDOWN 秒，期间不发请求。风控按账号算：换排序、换视频、
-    重新登录、换出口 IP 都不通，实测约 15 分钟后恢复（10-07 为 14.6–15.2 分钟）。到期放行
-    一个请求试探，仍被拦则每隔 _RECHECK 秒再试一次。其他信号不熔断。
+    熔断：收到 412 即停用 _COOLDOWN 秒，期间不发请求。评论与弹幕实测都约 15 分钟后恢复
+    （评论 10-07 为 14.6–15.2 分钟，弹幕 10-09 为 15.3–16.3 分钟）。到期放行一个请求试探，
+    仍被拦则每隔 _RECHECK 秒再试一次。其他信号不熔断。
     """
 
     def __init__(
         self,
+        scope: str,
+        interval: float,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        self.scope = scope
+        self._interval = interval
         self._clock = clock
         self._sleep = sleep
         self._lock = threading.Lock()
         self._last_start: float | None = None
-        self._starts: deque[float] = deque(maxlen=_PAGES_PER_MINUTE)
         self._blocked_until = 0.0  # 非 0 表示熔断过、尚未确认恢复
         self._signal = ""
         self._probing = False
 
     def _refuse(self, now: float) -> None:
         if now < self._blocked_until or self._probing:
-            raise _RateLimited(self._signal, "", retry_in=max(self._blocked_until - now, 0.0))
+            raise _RateLimited(
+                self._signal, "", retry_in=max(self._blocked_until - now, 0.0), scope=self.scope
+            )
 
     def acquire(self) -> None:
         with self._lock:
@@ -142,22 +152,18 @@ class _CommentGuard:
             self._refuse(now)
             if self._blocked_until:
                 self._probing = True
-                _log.warning("评论接口熔断到期，放行一个请求试探")
-            wait = 0.0
+                _log.warning("%s熔断到期，放行一个请求试探", self.scope)
             if self._last_start is not None:
-                wait = self._last_start + _COMMENT_INTERVAL - now
-            if len(self._starts) == _PAGES_PER_MINUTE:
-                wait = max(wait, self._starts[0] + 60 - now)
-            if wait > 0:
-                self._sleep(wait)
+                wait = self._last_start + self._interval - now
+                if wait > 0:
+                    self._sleep(wait)
             self._last_start = self._clock()
-            self._starts.append(self._last_start)
 
     def reached(self) -> None:
         """平台正常作答（含业务错误码），说明没被拦。"""
         with self._lock:
             if self._probing:
-                _log.warning("评论接口试探通过，熔断解除")
+                _log.warning("%s试探通过，熔断解除", self.scope)
             self._probing = False
             self._blocked_until = 0.0
 
@@ -170,11 +176,19 @@ class _CommentGuard:
             duration = _RECHECK if probing else _COOLDOWN
             self._signal = signal
             self._blocked_until = self._clock() + duration
-            _log.warning("评论接口熔断 %d 秒（信号 %s）", duration, signal)
+            _log.warning("%s熔断 %d 秒（信号 %s）", self.scope, duration, signal)
             return duration
 
 
-_comment_guard = _CommentGuard()
+def _new_guards() -> dict[str, _Guard]:
+    # 评论：10-07 实测每分钟 60 页在第 52 页被拦，20、40 页各连续 10 分钟没触发；取每 2 秒一页。
+    # 风控按账号算：换排序、换视频、重新登录、换出口 IP 都不通。
+    # 弹幕：10-09 实测每 6 秒一次连续 6 分钟没触发；每 3 秒一次在第 15 次被拦，21 秒连发 15 次
+    # 也触发了。按出口 IP 算，匿名请求同样被拦。取测过的每 6 秒一次。
+    return {"comments": _Guard("评论接口", 2.0), "danmaku": _Guard("弹幕接口", 6.0)}
+
+
+_guards = _new_guards()
 
 
 class HttpClient:
@@ -215,14 +229,24 @@ class HttpClient:
         allow_codes: set[int] | None = None,
     ) -> Any:
         """请求 JSON 接口并返回 data 字段；非 0 code 抛错（白名单除外）。"""
-        if _group(path) != "comments":
-            return self._get_json(path, params, referer, base_url, allow_codes)
-        guard = _comment_guard  # 取一次：测试会整个替换它
+        return self._guarded(
+            path, lambda: self._get_json(path, params, referer, base_url, allow_codes)
+        )
+
+    def get_api_bytes(self, path: str, params: dict[str, Any]) -> bytes:
+        """请求不返回 JSON 的平台接口（如弹幕 XML），与 get_json 共用节流、熔断与风控识别。"""
+        return self._guarded(path, lambda: self._fetch(path, params, _DEFAULT_REFERER, None))
+
+    def _guarded(self, path: str, call: Callable[[], Any]) -> Any:
+        guard = _guards.get(_group(path))  # 每次现取：测试会整个替换 _guards
+        if guard is None:
+            return call()
         guard.acquire()
         try:
-            data = self._get_json(path, params, referer, base_url, allow_codes)
+            data = call()
         except _RateLimited as e:
             e.retry_in = guard.failed(e.signal)
+            e.scope = guard.scope
             raise
         except BilibiliHttpError:
             guard.reached()
@@ -233,6 +257,26 @@ class HttpClient:
         guard.reached()
         return data
 
+    def _fetch(
+        self,
+        path: str,
+        params: dict[str, Any] | None,
+        referer: str,
+        base_url: str | None,
+    ) -> bytes:
+        base = base_url if base_url is not None else self.api_base
+        url = f"{base}{path}"
+        if params:
+            url = f"{url}?{urlencode(params)}"
+        recent = _recent.setdefault(_group(path), deque(maxlen=_RECENT_KEPT))
+        recent.append(time.monotonic())
+        try:
+            return self.get_bytes(url, referer)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (412, 429):
+                raise self._rate_limited(str(exc.code), path) from exc
+            raise
+
     def _get_json(
         self,
         path: str,
@@ -241,18 +285,7 @@ class HttpClient:
         base_url: str | None,
         allow_codes: set[int] | None,
     ) -> Any:
-        base = base_url if base_url is not None else self.api_base
-        url = f"{base}{path}"
-        if params:
-            url = f"{url}?{urlencode(params)}"
-        recent = _recent.setdefault(_group(path), deque(maxlen=_RECENT_KEPT))
-        recent.append(time.monotonic())
-        try:
-            raw = self.get_bytes(url, referer)
-        except urllib.error.HTTPError as exc:
-            if exc.code in (412, 429):
-                raise self._rate_limited(str(exc.code), path) from exc
-            raise
+        raw = self._fetch(path, params, referer, base_url)
         payload = json.loads(raw.decode("utf-8"))
         code = payload.get("code")
         if code in (-352, -509):
