@@ -399,7 +399,7 @@ wheels = [
 
 [[package]]
 name = "polylens-bilibili-mcp"
-version = "0.5.3"
+version = "0.5.4"
 source = { editable = "." }
 dependencies = [
     { name = "jq" },
